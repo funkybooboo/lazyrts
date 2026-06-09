@@ -1,0 +1,17 @@
+.{
+    .name = .lazyrts,
+    .version = "0.1.0",
+    .fingerprint = 0x62ad12228502519d,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .vaxis = .{
+            .url = "git+https://github.com/rockorager/libvaxis.git#a367b89da09bfe5e1b628501940de5b4f858f5f3",
+            .hash = "vaxis-0.6.0-BWNV_HHwCQB451KS7A8SMykALblPmGwHnzSfiJHjN3_9",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

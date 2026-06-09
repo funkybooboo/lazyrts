@@ -1,0 +1,63 @@
+# lazyrts
+
+Real-time strategy. In a terminal. With ~5% of the buttons.
+
+A deliberately tiny AOE2-flavored RTS, written in Zig, rendered as glyphs in your terminal. The "lazy" in the name is the design principle: every feature has to earn its place, and the default answer is *cut it*.
+
+## Build & Run
+
+```bash
+zig build          # compile
+zig build run      # run the game
+zig build test     # run unit tests
+```
+
+Requires Zig 0.16.0. Depends on [libvaxis](https://github.com/rockorager/libvaxis) (fetched automatically by the build system).
+
+## Controls
+
+| Key | Action |
+|-----|--------|
+| hjkl / arrows | Move cursor |
+| Q / Ctrl-C | Quit |
+
+More controls added as milestones ship. See roadmap.md.
+
+## Project Structure
+
+```
+src/
+  main.zig         entry point, event loop, wires modules
+  game.zig         State struct, game logic (cursor, resources, entities)
+  map.zig          Tile enum, GameMap (grid, generation, lookup)
+  input.zig        Key events -> state mutations
+  render.zig       vaxis drawing, tile styling
+build.zig          build configuration
+build.zig.zon      dependency manifest (vaxis)
+roadmap.md         milestones with definitions of done
+```
+
+## Architecture
+
+Single-threaded event loop via vaxis. No sim tick yet (comes in milestone 2). The game state is a plain struct (`game.State`) that modules read/mutate through function calls. No globals, no heap allocation in the hot path.
+
+Rendering is immediate mode: `render.draw()` reads state and writes cells every frame.
+
+## Design Principles
+
+- Aggressive subtraction: if a feature isn't in the scope table, the answer is *no*
+- Two resources: food, wood. Two units: Worker, Soldier. Four buildings: TC, House, Barracks, Farm
+- No ages, no tech tree, no fog of war, no multiplayer, no save/load
+- Unit tests on pure logic only. No render tests -- visual inspection is fine
+- Each milestone ships a runnable game
+
+## Scope
+
+| Thing | AOE2 | lazyrts |
+|-------|------|---------|
+| Resources | food, wood, gold, stone | food, wood |
+| Buildings | dozens | TC, House, Barracks, Farm |
+| Units | dozens, with upgrades | Worker, Soldier |
+| Ages | Dark through Imperial | none |
+| Map | random, big | fixed seed, 80x40 |
+| Players | up to 8 | 1v1 vs scripted AI |
