@@ -1,0 +1,26 @@
+[tools]
+zig = "0.16.0"
+
+[tasks.build]
+description = "Compile the game"
+run = "zig build"
+
+[tasks.run]
+description = "Run the game"
+run = "zig build run"
+
+[tasks.test]
+description = "Run all unit tests"
+run = "zig build test"
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "rm -rf .zig-cache zig-out"
+
+[tasks.lint]
+description = "Check formatting"
+run = "zig fmt --check src/"
+
+[tasks.format]
+description = "Auto-format source"
+run = "zig fmt src/"

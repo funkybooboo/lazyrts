@@ -1,41 +1,46 @@
 const std = @import("std");
-const vaxis = @import("vaxis");
 const game = @import("game.zig");
 const input = @import("input.zig");
 const render = @import("render.zig");
+const term = @import("terminal.zig");
+const ti = @import("time.zig");
 
-const Event = union(enum) {
-    key_press: vaxis.Key,
-    winsize: vaxis.Winsize,
-};
+const tick_period_ns: u64 = 100_000_000;
+const frame_sleep_ns: u64 = 1_000_000;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const alloc = init.gpa;
 
-    var buf: [1024]u8 = undefined;
-    var tty = try vaxis.Tty.init(io, &buf);
-    defer tty.deinit();
-
-    var vx = try vaxis.init(io, alloc, init.environ_map, .{});
-    defer vx.deinit(alloc, tty.writer());
-
-    var loop: vaxis.Loop(Event) = .init(io, &tty, &vx);
-    try loop.start();
-    defer loop.stop();
-
-    try vx.enterAltScreen(tty.writer());
-    try vx.queryTerminal(tty.writer(), .fromSeconds(1));
+    var t: term.Terminal = undefined;
+    try t.init(io, alloc, init.environ_map);
+    defer t.deinit();
 
     var state = game.State.init(42);
+    var ticker = ti.Ticker{ .period_ns = tick_period_ns };
 
     while (!state.quit) {
-        const ev = try loop.nextEvent();
-        switch (ev) {
-            .key_press => |key| input.handle(&state, key),
-            .winsize => |ws| try vx.resize(alloc, tty.writer(), ws),
+        const ticks = ticker.update(ti.mono_now());
+        for (0..ticks) |_| game.tick(&state);
+
+        while (try t.poll_event()) |ev| {
+            switch (ev) {
+                .key_press => |key| input.handle(&state, key),
+                .resize => {},
+            }
         }
-        render.draw(&vx, &state);
-        try vx.render(tty.writer());
+
+        render.draw(t.canvas(), &state);
+        try t.present();
+
+        ti.sleep_ns(frame_sleep_ns);
     }
+}
+
+test {
+    _ = game;
+    _ = input;
+    _ = render;
+    _ = term;
+    _ = ti;
 }

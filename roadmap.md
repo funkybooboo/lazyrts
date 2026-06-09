@@ -25,13 +25,13 @@ Map renders, cursor moves, Q quits.
 Place TC, spawn worker, walk to commanded tile via A*.
 
 **Done when:**
-- [ ] Entities exist: Worker struct with position, owner, state (idle/moving)
-- [ ] TC spawns a Worker on press of T key
-- [ ] M key: move selected worker to cursor via A* pathfinding
-- [ ] Worker moves one tile per tick, follows path
-- [ ] Fixed 10 Hz logic tick, decoupled from render
-- [ ] A* implemented in pathfinding.zig, tested on known grids
-- [ ] Unit tests: pathfinding finds shortest path, handles obstacles, unreachable tile
+- [X] Entities exist: Worker struct with position, owner, state (idle/moving)
+- [X] TC spawns a Worker on press of T key
+- [X] M key: move selected worker to cursor via A* pathfinding
+- [X] Worker moves one tile per tick, follows path
+- [X] Fixed 10 Hz logic tick, decoupled from render
+- [X] A* implemented in pathfinding.zig, tested on known grids
+- [X] Unit tests: pathfinding finds shortest path, handles obstacles, unreachable tile
 
 **Ships:** You can press T to spawn a worker, then M to tell it to walk somewhere. It pathfinds around obstacles.
 
