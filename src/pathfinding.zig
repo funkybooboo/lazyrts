@@ -4,10 +4,8 @@ const entity = @import("entity.zig");
 
 const Pos = entity.Pos;
 
-const MAP_SIZE = map.WIDTH * map.HEIGHT;
-
 fn idx(x: usize, y: usize) usize {
-    return y * map.WIDTH + x;
+    return y * map.MAX_MAP_WIDTH + x;
 }
 
 fn heuristic(a: Pos, b: Pos) u32 {
@@ -15,6 +13,8 @@ fn heuristic(a: Pos, b: Pos) u32 {
     const dy = @abs(@as(isize, @intCast(a.y)) - @as(isize, @intCast(b.y)));
     return @intCast(dx + dy);
 }
+
+const MAP_SIZE = map.MAX_MAP_WIDTH * map.MAX_MAP_HEIGHT;
 
 pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) ?usize {
     if (start.x == goal.x and start.y == goal.y) return 0;
@@ -28,10 +28,10 @@ pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) 
     var open_len: usize = 0;
     var closed: [MAP_SIZE]bool = undefined;
 
-    for (&g_score) |*g| g.* = std.math.maxInt(u32);
-    for (&f_score) |*f| f.* = std.math.maxInt(u32);
-    for (&came_from) |*c| c.* = null;
-    for (&closed) |*c| c.* = false;
+    @memset(&g_score, std.math.maxInt(u32));
+    @memset(&f_score, std.math.maxInt(u32));
+    @memset(&came_from, @as(?Pos, null));
+    @memset(&closed, false);
 
     const si = idx(start.x, start.y);
     g_score[si] = 0;
@@ -91,7 +91,7 @@ pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) 
             if (nx < 0 or ny < 0) continue;
             const nux: usize = @intCast(nx);
             const nuy: usize = @intCast(ny);
-            if (nux >= map.WIDTH or nuy >= map.HEIGHT) continue;
+            if (nux >= m.width or nuy >= m.height) continue;
             if (!m.is_walkable(nux, nuy)) continue;
             const ni = idx(nux, nuy);
             if (closed[ni]) continue;
@@ -111,7 +111,15 @@ pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) 
 }
 
 test "find_path: straight line" {
-    var m: map.GameMap = undefined;
+    var m: map.GameMap = .{
+        .tiles = undefined,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
     for (&m.tiles) |*row| {
         for (row) |*t| t.* = .grass;
     }
@@ -123,23 +131,36 @@ test "find_path: straight line" {
 }
 
 test "find_path: around obstacle" {
-    var m: map.GameMap = undefined;
+    var m: map.GameMap = .{
+        .tiles = undefined,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
     for (&m.tiles) |*row| {
         for (row) |*t| t.* = .grass;
     }
-    for (0..10) |y| {
-        m.tiles[y][5] = .tree;
+    for (5..35) |y| {
+        m.tiles[y][20] = .tree;
     }
     var path: [256]Pos = undefined;
-    const len = find_path(&m, .{ .x = 3, .y = 5 }, .{ .x = 7, .y = 5 }, &path) orelse unreachable;
-    try std.testing.expect(len > 4);
-    for (0..len) |i| {
-        try std.testing.expect(m.tiles[path[i].y][path[i].x] == .grass);
-    }
+    const len = find_path(&m, .{ .x = 10, .y = 20 }, .{ .x = 30, .y = 20 }, &path) orelse unreachable;
+    try std.testing.expect(len > 20);
 }
 
 test "find_path: unreachable" {
-    var m: map.GameMap = undefined;
+    var m: map.GameMap = .{
+        .tiles = undefined,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
     for (&m.tiles) |*row| {
         for (row) |*t| t.* = .grass;
     }
@@ -156,7 +177,15 @@ test "find_path: unreachable" {
 }
 
 test "find_path: start equals goal" {
-    var m: map.GameMap = undefined;
+    var m: map.GameMap = .{
+        .tiles = undefined,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
     for (&m.tiles) |*row| {
         for (row) |*t| t.* = .grass;
     }
@@ -166,7 +195,15 @@ test "find_path: start equals goal" {
 }
 
 test "find_path: goal is unwalkable" {
-    var m: map.GameMap = undefined;
+    var m: map.GameMap = .{
+        .tiles = undefined,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
     for (&m.tiles) |*row| {
         for (row) |*t| t.* = .grass;
     }

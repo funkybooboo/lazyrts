@@ -24,3 +24,11 @@ run = "zig fmt --check src/"
 [tasks.format]
 description = "Auto-format source"
 run = "zig fmt src/"
+
+[tasks.ci]
+description = "Run all checks: format, lint, build, test"
+run = [
+  "zig fmt --check src/",
+  "zig build",
+  "zig build test",
+]

@@ -16,7 +16,17 @@ pub fn main(init: std.process.Init) !void {
     try t.init(io, alloc, init.environ_map);
     defer t.deinit();
 
-    var state = game.State.init(42);
+    var canvas = t.canvas();
+    while (canvas.width() < 20 or canvas.height() < 15) {
+        while (try t.poll_event()) |ev| {
+            if (ev == .resize) break;
+        }
+        canvas = t.canvas();
+        ti.sleep_ns(10_000_000);
+    }
+
+    const seed: u64 = ti.mono_now();
+    var state = game.State.init(seed, canvas.width(), canvas.height());
     var ticker = ti.Ticker{ .period_ns = tick_period_ns };
 
     while (!state.quit) {
@@ -43,4 +53,5 @@ test {
     _ = render;
     _ = term;
     _ = ti;
+    _ = @import("color.zig");
 }

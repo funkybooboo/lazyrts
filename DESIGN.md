@@ -23,7 +23,7 @@ Win condition: destroy the enemy Town Center.
 | Units       | dozens, with upgrades         | **Worker, Soldier**              |
 | Ages        | Dark / Feudal / Castle / Imp  | none                             |
 | Tech tree   | huge                          | none                             |
-| Map         | random, big                   | fixed seed, ~80x40               |
+| Map         | random, big                   | dynamic size, fits terminal      |
 | Players     | up to 8                       | 1v1, you vs scripted AI          |
 | Fog of war  | yes                           | not in v1                        |
 | Multiplayer | yes                           | no                               |
@@ -38,7 +38,7 @@ If you want a feature that isn't in the right column, the answer is *probably no
 
 ## Rendering
 
-One glyph per tile.
+One glyph per tile. Coordinates shown as column letters (A-Z, AA-AZ...) stacked vertically in header, row numbers on left.
 
 | Glyph | Thing            |
 |-------|------------------|
@@ -51,8 +51,9 @@ One glyph per tile.
 | `F`   | Farm             |
 | `w`   | Worker           |
 | `s`   | Soldier          |
+| `d`   | Deer             |
 
-Color via ANSI: own = blue, enemy = red, resources = green/yellow, terrain = dim.
+Color: player=cyan, enemy=red, neutral=brown. Selected unit = owner color background. Cursor = owner color background. Health = color brightness (dark=healthy, bright=damaged).
 
 ## Sim model
 
@@ -64,56 +65,57 @@ Fixed-tick simulation, decoupled render.
 
 This is the standard RTS architecture for a reason -- it makes replay, AI scripting, and debugging tractable.
 
-## Modules
-
-```
-src/
-  main.zig         entry + event loop
-  game.zig         GameState, tick()
-  map.zig          tile grid, terrain gen, resource placement
-  entity.zig       Worker / Soldier / Building, owner, hp, state
-  command.zig      order queue: move, gather, build, attack
-  pathfinding.zig  A* on tile grid
-  combat.zig       adjacency damage per tick
-  economy.zig      resource counters, drop-off, pop cap
-  ai.zig           scripted opponent
-  render.zig       vaxis buffer writes
-  input.zig        cursor, selection, command dispatch
-build.zig
-build.zig.zon      vaxis dep
-```
-
 ## UI layout
 
 ```
-+--------------------------------------+-----------+
-|                                      | Resources |
-|           map viewport               |  food: 50 |
-|        (scrolls with cursor)         |  wood: 30 |
-|                                      |  pop: 4/10|
-|                                      +-----------+
-|                                      |  Selected |
-|                                      |  Worker   |
-|                                      |  HP 25/25 |
-|                                      +-----------+
-|                                      |  Minimap  |
-+--------------------------------------+-----------+
-status bar: hints / messages
+ A
+ B     <-- stacked column headers (2-3 rows for AA+ columns)
+ C
+7  ...map tiles fill terminal edge-to-edge...   00:35
+8  ...row labels on left, 3 chars wide...         Pop:2/5 W:2 S:0
+9  ...drawer shows tile/entity info at bottom...    hjkl=move Q=quit
+------------------------------------------------------------
+ Tile:Grass D14   Sel:Worker Player HP:50/50 moving
+ Pop:2/5 W:2 S:0                                      00:35
+ hjkl=move T=spawn M=move Tab=select G=coord Q=quit
+------------------------------------------------------------
 ```
+
+Map fills terminal edge-to-edge. Bottom 5 rows are the info drawer. Top 1-3 rows are column headers (stacked for multi-letter columns like AA). Left 3 columns are row number labels.
 
 ## Controls
 
 | Key            | Action                                   |
 |----------------|------------------------------------------|
 | Arrows / hjkl  | Move cursor                              |
-| Space          | Select entity under cursor               |
-| M              | Move selected to cursor                  |
-| A              | Attack-move to cursor                    |
-| G              | Gather (worker -> tree/farm under cursor)|
-| B              | Build menu (then key per building)       |
-| T              | Train (TC: worker; Barracks: soldier)    |
 | Tab            | Cycle own units                          |
-| Q              | Quit                                     |
+| G              | Enter coordinate jump mode               |
+| M              | Move selected unit to cursor             |
+| T              | Train worker at TC                        |
+| Q / Ctrl-C     | Quit                                     |
+
+## Modules
+
+```
+src/
+  main.zig         entry + event loop
+  game.zig         GameState, tick(), coordinates, pop counts
+  map.zig          tile grid, BFS cluster generation, deer spawning
+  entity.zig       Worker / Soldier / Deer / Building, owner, hp, state
+  command.zig      order queue: move, gather, build, attack (milestone 3+)
+  pathfinding.zig  A* on tile grid
+  combat.zig       adjacency damage per tick (milestone 6+)
+  economy.zig      resource counters, drop-off, pop cap (milestone 3+)
+  ai.zig           scripted opponent (milestone 7+)
+  render.zig       map + label + entity rendering
+  drawer.zig       bottom info panel rendering
+  input.zig        key events -> state mutations
+  color.zig        centralized color palette, health shading
+  terminal.zig     vaxis wrapper (Canvas, Key, Style, ASCII lookup table)
+  time.zig         monotonic clock, tick accumulator
+build.zig
+build.zig.zon      vaxis dep
+```
 
 ## Milestones
 
@@ -140,6 +142,7 @@ Each milestone ships a runnable game.
 - **Input latency.** Depends on terminal emulator; vaxis raw mode should keep it under ~50 ms.
 - **AI brittleness.** Scripted AI is dumb but predictable, which is correct for "simple". Resist behavior trees and utility AI.
 - **Real-time feel.** 10 Hz tick is the sweet spot. If it feels sluggish, raise to 15 Hz before changing architecture.
+- **Grapheme rendering.** vaxis stores `[]const u8` grapheme slices, not copies. Stack temporaries get invalidated. Fixed with comptime ASCII lookup table in Canvas.
 
 ## Non-goals
 

@@ -76,6 +76,14 @@ pub const Event = union(enum) {
 pub const Canvas = struct {
     win: vaxis.Window,
 
+    const ascii_table: [128][]const u8 = blk: {
+        var table: [128][]const u8 = undefined;
+        for (0..128) |i| {
+            table[i] = &[_]u8{@intCast(i)};
+        }
+        break :blk table;
+    };
+
     pub fn clear(self: Canvas) void {
         self.win.clear();
     }
@@ -89,10 +97,20 @@ pub const Canvas = struct {
     }
 
     pub fn write_cell(self: Canvas, x: u16, y: u16, glyph: []const u8, s: Style) void {
+        const g: []const u8 = if (glyph.len == 1 and glyph[0] < 128) ascii_table[glyph[0]] else glyph;
         self.win.writeCell(x, y, .{
-            .char = .{ .grapheme = glyph },
+            .char = .{ .grapheme = g },
             .style = to_vaxis_style(s),
         });
+    }
+
+    pub fn write_str(self: Canvas, x: u16, y: u16, text: []const u8, s: Style) void {
+        var cx: u16 = x;
+        for (text) |ch| {
+            if (ch < 32 or ch > 126) continue;
+            self.write_cell(cx, y, &[_]u8{ch}, s);
+            cx += 1;
+        }
     }
 };
 

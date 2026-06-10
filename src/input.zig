@@ -2,6 +2,11 @@ const term = @import("terminal.zig");
 const game = @import("game.zig");
 
 pub fn handle(s: *game.State, key: term.Key) void {
+    if (s.coord_mode) {
+        handle_coord(s, key);
+        return;
+    }
+
     if (key.is_char('q') or key.is_ctrl('c')) {
         s.quit = true;
     } else if (key.is_left() or key.is_char('h')) {
@@ -18,5 +23,46 @@ pub fn handle(s: *game.State, key: term.Key) void {
         game.move_selected(s);
     } else if (key.is_tab()) {
         game.select_next(s);
+    } else if (key.is_char('g')) {
+        s.coord_mode = true;
+        s.coord_len = 0;
+    }
+}
+
+fn handle_coord(s: *game.State, key: term.Key) void {
+    if (key.is_escape()) {
+        s.coord_mode = false;
+        s.coord_len = 0;
+        return;
+    }
+
+    if (key.is_enter()) {
+        if (game.parse_coord(s.coord_buf[0..], s.coord_len)) |coord| {
+            if (coord.x < s.world.width and coord.y < s.world.height) {
+                s.cursor_x = coord.x;
+                s.cursor_y = coord.y;
+            }
+        }
+        s.coord_mode = false;
+        s.coord_len = 0;
+        return;
+    }
+
+    if (key.kind == .char and !key.ctrl and s.coord_len < s.coord_buf.len) {
+        const ch = key.char_val;
+        if (ch >= 'A' and ch <= 'Z') {
+            s.coord_buf[s.coord_len] = ch;
+            s.coord_len += 1;
+        } else if (ch >= '0' and ch <= '9' and s.coord_len > 0) {
+            s.coord_buf[s.coord_len] = ch;
+            s.coord_len += 1;
+        } else if (ch >= 'a' and ch <= 'z') {
+            s.coord_buf[s.coord_len] = ch - 32;
+            s.coord_len += 1;
+        }
+    }
+
+    if (key.is_ctrl('c')) {
+        s.quit = true;
     }
 }

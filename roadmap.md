@@ -32,8 +32,17 @@ Place TC, spawn worker, walk to commanded tile via A*.
 - [X] Fixed 10 Hz logic tick, decoupled from render
 - [X] A* implemented in pathfinding.zig, tested on known grids
 - [X] Unit tests: pathfinding finds shortest path, handles obstacles, unreachable tile
+- [X] Dynamic map size fills terminal minus drawer
+- [X] Bottom info drawer: tile info, selected unit, resources, stats, cheat sheet
+- [X] Coordinate labels (column headers + row numbers) and G-key cursor jump
+- [X] Owner colors: player=blue, enemy=red for all units and buildings
+- [X] Cluster-based map generator with forests, lakes, BFS path verification
+- [X] Player TC on left, enemy TC on right, both vertically centered
+- [X] Deer (neutral wandering animals) spawn scaled by map size
+- [X] Starting workers: 2 per side at game start
+- [X] Deer wander randomly, not controllable
 
-**Ships:** You can press T to spawn a worker, then M to tell it to walk somewhere. It pathfinds around obstacles.
+**Ships:** Full-screen map with coordinate grid, bottom drawer, colored teams, cluster terrain, deer, starting workers. G+A5 jumps cursor.
 
 ---
 
