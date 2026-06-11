@@ -98,10 +98,10 @@ Build House, Farm, Barracks, Drop Pile. Workers construct and repair persistentl
 **Ships:** You can build houses, farms, drop piles, and barracks. Workers construct and repair persistently. The economy has two resources now.
 
 #### Cost Table
-| Item | Food | Wood |
-|------|------|------|
-| Worker | 50 | 0 |
-| Soldier | 60 | 20 |
+| Item | Food | Wood | Size |
+|------|------|------|------|
+| Worker | 50 | 0 | - |
+| Soldier | 60 | 20 | - |
 | House | 0 | 30 | 2x2 |
 | Barracks | 25 | 50 | 2x3 |
 | Farm | 0 | 60 | 3x3 |
