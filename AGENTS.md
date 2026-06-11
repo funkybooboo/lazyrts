@@ -32,10 +32,11 @@ Uses `time.Ticker` for 10 Hz tick. Calls `render.draw()`. Does not contain game 
 
 ### game.zig
 `State` struct -- pure data, no methods except `init(seed)`. All game logic is free functions.
-- State fields: cursor position, quit flag, world map, unit list, building list, selected_unit
+- State fields: cursor position, quit flag, world map, unit list, building list, selected_units (multiselect), gather mode state
 - `init(seed)` creates State with fresh map + both TCs registered as buildings
-- Free functions: `moveCursor`, `tick`, `spawnWorker`, `spawnUnit`, `moveSelected`, `selectNext`, `unitAt`, `buildingAt`, `playerTC`
-- `spawnUnit(kind, owner, cx, cy)` -- parameterized for AI use (milestone 7)
+- Free functions: `moveCursor`, `tick`, `spawnWorker`, `spawnUnit`, `moveSelected`, `selectNext`, `selectIdleWorkers`, `selectAllWorkers`, `selectIdleFighters`, `selectAllFighters`, `selectNextBuilding`, `unitAt`, `buildingAt`, `playerTC`
+- Workers have persistent task states: gathering_wood, gathering_food, hunting, constructing
+- `spawnUnit(kind, owner, cx, cy)` -- parameterized for AI use (milestone 8)
 - `findSpawn` is file-private, takes `*const GameMap` not `*State`
 - `playerTC` finds player TC position from buildings array
 - Every milestone adds fields + functions here
@@ -54,12 +55,17 @@ Uses `time.Ticker` for 10 Hz tick. Calls `render.draw()`. Does not contain game 
 ### entity.zig
 `Unit` and `Building` types + shared types. Pure data + `Unit.step()` movement.
 - `Pos` -- 2D coordinate, `x`/`y` as `usize`
-- `Owner` -- `player` or `enemy`
-- `UnitKind` -- `worker` or `soldier`, with `glyph()` and `maxHp()`
-- `BuildingKind` -- `town_center`, `house`, `barracks`, `farm`, with `glyph()` and `maxHp()`
-- `UnitState` -- `idle` or `moving`
-- `Unit` -- x, y, kind, owner, hp, state, path. `pos()`, `step()` methods.
-- `Building` -- x, y, kind, owner, hp. No movement.
+- `Owner` -- `player` or `enemy` or `neutral`
+- `UnitKind` -- `worker` or `soldier` or `deer`, with `glyph()` and `maxHp()`
+- `BuildingKind` -- `town_center`, `house`, `barracks`, `farm`, `drop_pile`, with `glyph()`, `maxHp()`, `label()`, `cost()`, `size()`, `damage_to()`
+- `UnitState` -- `idle`, `moving`, `gathering_wood`, `gathering_food`, `hunting`, `constructing`
+- `Unit` -- x, y, kind, owner, hp, state, path, gather_target. `pos()`, `step()` methods.
+- Units regenerate 1 HP per 30 ticks, pauses 5 ticks after taking damage. Workers fight at 3 dmg, soldiers at 8 dmg.
+- `Building` -- x, y, kind, owner, hp, build_progress. Multi-tile (TC 3x3, House 2x2, Barracks 2x3, Farm 3x3, DropPile 1x1). Repairable for 1/2 original wood cost.
+- One unit per tile, no stacking. Units must path around each other.
+- Building costs: House=30w, Barracks=25f+50w, Farm=60w, DropPile=50w, FarmResow=60w
+- Unit costs: Worker=50f, Soldier=60f+20w
+- Resource yields: Tree=100w, Farm=250f (then fallow), Deer=100f
 - `MAX_PATH`, `MAX_UNITS`, `MAX_BUILDINGS` -- constants
 
 ### pathfinding.zig
@@ -78,6 +84,24 @@ Monotonic clock and tick accumulator.
 ### input.zig
 Key-to-state-mutation bridge. Takes `*State` and a `term.Key`, mutates state.
 One public function: `handle(*State, term.Key)`.
+Key bindings (current and planned):
+- hjkl / arrows: move cursor
+- Q / Ctrl-C: quit
+- T: spawn worker at TC
+- M: move selected unit to cursor
+- Tab: cycle player units
+- Shift+Tab: cycle player buildings
+- G: gather (persistent task — wood, deer, farm)
+- J: cursor jump (coordinate input mode)
+- W: select all idle workers
+- Shift+W: select all workers
+- F: select all idle fighters
+- Shift+F: select all fighters
+- Shift+direction: add unit to selection (multiselect)
+- B: build menu (H=House, F=Farm, D=Drop Pile, R=Barracks)
+- E: repair selected building
+- R: resow fallow farm (60 wood)
+- A: attack-move (milestone 6)
 No rendering, no I/O.
 
 ### render.zig
@@ -85,6 +109,7 @@ Takes a `term.Canvas` and `*const State`, draws the frame.
 - `draw()` is the only public function.
 - `tileStyle()` and `entityStyle()` map data to visual style.
 - Uses `game.entityAt()` for entity overlay.
+- Fog of war: unexplored tiles render as unknown, explored tiles dim, visible tiles bright (milestone 7)
 - No state mutation. Pure rendering.
 
 ### terminal.zig
@@ -103,9 +128,10 @@ Wrapper around vaxis. Own types for Color, Style, Key, Event, Canvas, Terminal.
 The spec lists these upcoming modules:
 ```
 command.zig      order queue: move, gather, build, attack
-combat.zig       adjacency damage per tick
-economy.zig      resource counters, drop-off, pop cap
-ai.zig           scripted opponent
+economy.zig      resource counters, drop-off, pop cap, persistent tasks
+combat.zig       adjacency damage per tick, unit regeneration
+fog.zig          visibility, explored tiles, vision range
+ai.zig           reactive opponent (event-driven, strategy-switching)
 ```
 
 When adding one:
@@ -114,6 +140,18 @@ When adding one:
 3. `game.State` gains the new fields. Other modules read/update `*State`.
 4. `input.zig` gains key bindings. `render.zig` gains display code.
 5. Run `zig build test` before declaring done.
+
+## Milestones
+1. Empty world
+2. One worker
+3. Economy (persistent gather, drop piles)
+4. Buildings (construct, repair, multi-tile)
+5. Military (training, selection shortcuts)
+6. Combat (all units fight, regeneration)
+7. Fog of war (exploration, vision)
+8. AI (reactive, strategy-switching)
+9. Win/lose (TC destruction, restart)
+10. Multiplayer (human vs human)
 
 ## Testing Rules
 
