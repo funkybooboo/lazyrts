@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub const Pos = struct { x: usize, y: usize };
 
 pub const Owner = enum(u2) { player, enemy, neutral };
@@ -105,8 +107,6 @@ pub const Building = struct {
         return self.build_progress >= 100;
     }
 };
-
-const std = @import("std");
 
 test "Unit.pos returns coordinates" {
     const u = Unit{ .x = 7, .y = 12, .kind = .worker, .owner = .player, .hp = 50 };

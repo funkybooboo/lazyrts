@@ -1,3 +1,4 @@
+const std = @import("std");
 const map = @import("map.zig");
 const entity = @import("entity.zig");
 const pathfinding = @import("pathfinding.zig");
@@ -354,8 +355,6 @@ fn find_spawn(world: *const map.GameMap, cx: usize, cy: usize) entity.Pos {
     }
     return .{ .x = cx, .y = cy };
 }
-
-const std = @import("std");
 
 test "move_cursor clamps to bounds" {
     var s = State.init(1, 80, 45);

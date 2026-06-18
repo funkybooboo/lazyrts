@@ -1,3 +1,4 @@
+const std = @import("std");
 const entity = @import("entity.zig");
 
 pub fn lerp(a: u8, b: u8, t: f32) u8 {
@@ -84,8 +85,6 @@ pub const TileColor = struct {
 };
 
 pub const tile_colors = TileColor{};
-
-const std = @import("std");
 
 test "lerp at boundaries" {
     try std.testing.expectEqual(@as(u8, 100), lerp(100, 200, 0.0));

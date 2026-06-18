@@ -5,8 +5,11 @@ const render = @import("render.zig");
 const term = @import("terminal.zig");
 const ti = @import("time.zig");
 
-const tick_period_ns: u64 = 100_000_000;
-const frame_sleep_ns: u64 = 1_000_000;
+const TICK_PERIOD_NS = 100_000_000;
+const RESIZE_POLL_INTERVAL_NS = 10_000_000;
+const FRAME_SLEEP_NS = 1_000_000;
+const MIN_FRAME_WIDTH = 20;
+const MIN_FRAME_HEIGHT = 15;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -17,17 +20,17 @@ pub fn main(init: std.process.Init) !void {
     defer t.deinit();
 
     var canvas = t.canvas();
-    while (canvas.width() < 20 or canvas.height() < 15) {
+    while (canvas.width() < MIN_FRAME_WIDTH or canvas.height() < MIN_FRAME_HEIGHT) {
         while (try t.poll_event()) |ev| {
             if (ev == .resize) break;
         }
         canvas = t.canvas();
-        ti.sleep_ns(10_000_000);
+        ti.sleep_ns(RESIZE_POLL_INTERVAL_NS);
     }
 
-    const seed: u64 = ti.mono_now();
+    const seed = ti.mono_now();
     var state = game.State.init(seed, canvas.width(), canvas.height());
-    var ticker = ti.Ticker{ .period_ns = tick_period_ns };
+    var ticker = ti.Ticker{ .period_ns = TICK_PERIOD_NS };
 
     while (!state.quit) {
         const ticks = ticker.update(ti.mono_now());
@@ -43,7 +46,7 @@ pub fn main(init: std.process.Init) !void {
         render.draw(t.canvas(), &state);
         try t.present();
 
-        ti.sleep_ns(frame_sleep_ns);
+        ti.sleep_ns(FRAME_SLEEP_NS);
     }
 }
 

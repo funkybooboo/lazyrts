@@ -1,10 +1,10 @@
+const std = @import("std");
 const term = @import("terminal.zig");
 const game = @import("game.zig");
 const map = @import("map.zig");
 const entity = @import("entity.zig");
 const drawer = @import("drawer.zig");
 const color = @import("color.zig");
-const std = @import("std");
 
 pub fn draw(canvas: term.Canvas, state: *const game.State) void {
     canvas.clear();

@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub fn mono_now() u64 {
     var ts: std.os.linux.timespec = undefined;
     _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
@@ -33,8 +35,6 @@ pub const Ticker = struct {
         return ticks;
     }
 };
-
-const std = @import("std");
 
 test "Ticker accumulates and fires" {
     var t = Ticker{ .period_ns = 100, .last = 1000, .accum = 250 };
