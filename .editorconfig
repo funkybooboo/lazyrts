@@ -1,0 +1,41 @@
+# EditorConfig for Zig + Neovim project
+# https://editorconfig.org
+
+root = true
+
+# Global defaults
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Zig source files
+[*.{zig,zon}]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# C files (often used with Zig for C interop)
+[*.{c,h}]
+indent_style = space
+indent_size = 4
+
+# Build scripts and shell scripts
+[{build.zig,*.sh,*.bash}]
+indent_style = space
+indent_size = 4
+
+# Documentation
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# Config files
+[*.{yml,yaml,toml,json}]
+indent_style = space
+indent_size = 2
+
+# Git attributes and ignore files
+[.git*]
+indent_style = tab

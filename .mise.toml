@@ -15,7 +15,7 @@ run = "zig build test"
 
 [tasks.clean]
 description = "Remove build artifacts"
-run = "rm -rf .zig-cache zig-out"
+run = "rm -rf .zig-cache zig-out zig-pkg"
 
 [tasks.lint]
 description = "Check formatting"
@@ -27,8 +27,4 @@ run = "zig fmt src/"
 
 [tasks.ci]
 description = "Run all checks: format, lint, build, test"
-run = [
-  "zig fmt --check src/",
-  "zig build",
-  "zig build test",
-]
+run = ["zig fmt --check src/", "zig build", "zig build test"]
