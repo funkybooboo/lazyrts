@@ -1,6 +1,8 @@
 const std = @import("std");
 const config = @import("config.zig");
 const unit = @import("unit.zig");
+const game_map = @import("map.zig");
+const building = @import("building.zig");
 const spatial = @import("spatial.zig");
 
 pub const NatureKind = enum {
@@ -88,4 +90,117 @@ test "max_hp positive" {
 test "Nature default state is idle" {
     const n = Nature{ .x = 0, .y = 0, .kind = .deer, .hp = 25 };
     try std.testing.expectEqual(NatureState.idle, n.state);
+}
+
+test "wander doesn't happen when state is wandering" {
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(game_map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    const m = game_map.GameMap{
+        .tiles = tiles,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
+    var units = [_]unit.Unit{};
+    var buildings = [_]building.Building{};
+    var nature_arr = [_]Nature{
+        .{ .x = 10, .y = 10, .kind = .deer, .hp = 25, .state = .wandering },
+    };
+    var s: spatial.State = .{
+        .allocator = allocator,
+        .world = m,
+        .units = &units,
+        .unit_count = 0,
+        .buildings = &buildings,
+        .building_count = 0,
+        .nature = &nature_arr,
+        .nature_count = 1,
+        .cfg = &cfg,
+    };
+    const initial_x = s.nature[0].x;
+    const initial_y = s.nature[0].y;
+    wander(&s.nature[0], s.world, &s, cfg.deer.wander_interval, 0, &cfg);
+    try std.testing.expectEqual(initial_x, s.nature[0].x);
+    try std.testing.expectEqual(initial_y, s.nature[0].y);
+}
+
+test "wander doesn't happen on wrong tick" {
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(game_map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    const m = game_map.GameMap{
+        .tiles = tiles,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
+    var units = [_]unit.Unit{};
+    var buildings = [_]building.Building{};
+    var nature_arr = [_]Nature{
+        .{ .x = 10, .y = 10, .kind = .deer, .hp = 25, .state = .idle },
+    };
+    var s: spatial.State = .{
+        .allocator = allocator,
+        .world = m,
+        .units = &units,
+        .unit_count = 0,
+        .buildings = &buildings,
+        .building_count = 0,
+        .nature = &nature_arr,
+        .nature_count = 1,
+        .cfg = &cfg,
+    };
+    const initial_x = s.nature[0].x;
+    const initial_y = s.nature[0].y;
+    wander(&s.nature[0], s.world, &s, cfg.deer.wander_interval + 1, 0, &cfg);
+    try std.testing.expectEqual(initial_x, s.nature[0].x);
+    try std.testing.expectEqual(initial_y, s.nature[0].y);
+}
+
+test "wander attempts on correct tick" {
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(game_map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    const m = game_map.GameMap{
+        .tiles = tiles,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
+    var units = [_]unit.Unit{};
+    var buildings = [_]building.Building{};
+    var nature_arr = [_]Nature{
+        .{ .x = 10, .y = 10, .kind = .deer, .hp = 25, .state = .idle },
+    };
+    var s: spatial.State = .{
+        .allocator = allocator,
+        .world = m,
+        .units = &units,
+        .unit_count = 0,
+        .buildings = &buildings,
+        .building_count = 0,
+        .nature = &nature_arr,
+        .nature_count = 1,
+        .cfg = &cfg,
+    };
+    wander(&s.nature[0], s.world, &s, cfg.deer.wander_interval, 0, &cfg);
 }

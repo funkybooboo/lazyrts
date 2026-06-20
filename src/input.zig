@@ -69,3 +69,172 @@ fn handle_coord(s: *game.State, key: terminal.Key) void {
         s.quit = true;
     }
 }
+
+const std = @import("std");
+const config = @import("config.zig");
+
+test "handle: 'q' sets quit flag" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    try std.testing.expect(!s.quit);
+    const key = terminal.Key{ .kind = .char, .char_val = 'q' };
+    handle(&s, key);
+    try std.testing.expect(s.quit);
+}
+
+test "handle: ctrl-c sets quit flag" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    const key = terminal.Key{ .kind = .char, .char_val = 'c', .ctrl = true };
+    handle(&s, key);
+    try std.testing.expect(s.quit);
+}
+
+test "handle: 'h' moves cursor left" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    s.cursor_x = 10;
+    const key = terminal.Key{ .kind = .char, .char_val = 'h' };
+    handle(&s, key);
+    try std.testing.expectEqual(@as(usize, 9), s.cursor_x);
+}
+
+test "handle: left arrow moves cursor left" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    s.cursor_x = 10;
+    const key = terminal.Key{ .kind = .left };
+    handle(&s, key);
+    try std.testing.expectEqual(@as(usize, 9), s.cursor_x);
+}
+
+test "handle: 'l' moves cursor right" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    s.cursor_x = 10;
+    const key = terminal.Key{ .kind = .char, .char_val = 'l' };
+    handle(&s, key);
+    try std.testing.expectEqual(@as(usize, 11), s.cursor_x);
+}
+
+test "handle: 'k' moves cursor up" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    s.cursor_y = 10;
+    const key = terminal.Key{ .kind = .char, .char_val = 'k' };
+    handle(&s, key);
+    try std.testing.expectEqual(@as(usize, 9), s.cursor_y);
+}
+
+test "handle: 'j' moves cursor down" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    s.cursor_y = 10;
+    const key = terminal.Key{ .kind = .char, .char_val = 'j' };
+    handle(&s, key);
+    try std.testing.expectEqual(@as(usize, 11), s.cursor_y);
+}
+
+test "handle: 't' spawns worker" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    const initial_count = s.unit_count;
+    const key = terminal.Key{ .kind = .char, .char_val = 't' };
+    handle(&s, key);
+    try std.testing.expectEqual(initial_count + 1, s.unit_count);
+}
+
+test "handle: tab cycles selection forward" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    if (s.unit_count < 2) return;
+    const initial = s.selected_unit orelse return;
+    const key = terminal.Key{ .kind = .tab };
+    handle(&s, key);
+    const after = s.selected_unit orelse return;
+    try std.testing.expect(initial != after);
+}
+
+test "handle: 'c' enters coord mode" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    try std.testing.expect(!s.coord_mode);
+    const key = terminal.Key{ .kind = .char, .char_val = 'c' };
+    handle(&s, key);
+    try std.testing.expect(s.coord_mode);
+}
+
+test "handle: coord mode builds coordinate and moves cursor" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    
+    // Enter coord mode
+    s.coord_mode = true;
+    s.coord_len = 0;
+    
+    // Type "a5"
+    handle(&s, .{ .kind = .char, .char_val = 'a' });
+    handle(&s, .{ .kind = .char, .char_val = '5' });
+    
+    // Press enter
+    handle(&s, .{ .kind = .enter });
+    
+    try std.testing.expect(!s.coord_mode);
+    try std.testing.expectEqual(@as(usize, 0), s.cursor_x);
+    try std.testing.expectEqual(@as(usize, 4), s.cursor_y);
+}
+
+test "handle: coord mode escape cancels" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    
+    s.coord_mode = true;
+    s.coord_len = 0;
+    handle(&s, .{ .kind = .char, .char_val = 'a' });
+    
+    // Press escape
+    handle(&s, .{ .kind = .escape });
+    
+    try std.testing.expect(!s.coord_mode);
+    try std.testing.expectEqual(@as(usize, 0), s.coord_len);
+}
+
+test "handle: coord mode lowercase converts to uppercase" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try game.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    
+    s.coord_mode = true;
+    s.coord_len = 0;
+    
+    // Type lowercase 'z'
+    handle(&s, .{ .kind = .char, .char_val = 'z' });
+    
+    try std.testing.expectEqual(@as(u8, 'Z'), s.coord_buf[0]);
+    try std.testing.expectEqual(@as(usize, 1), s.coord_len);
+}

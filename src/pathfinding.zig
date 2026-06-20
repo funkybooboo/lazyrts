@@ -355,3 +355,94 @@ test "find_path: goal is unwalkable" {
     const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null);
     try std.testing.expect(result == null);
 }
+
+test "find_path: start is unwalkable" {
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    var m: map.GameMap = .{
+        .tiles = tiles,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
+    m.tiles[5 * 80 + 5] = .water;
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null);
+    try std.testing.expect(result == null);
+}
+
+test "find_path: diagonal path" {
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    const m: map.GameMap = .{
+        .tiles = tiles,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const len = find_path(allocator, &m, .{ .x = 0, .y = 0 }, .{ .x = 10, .y = 10 }, path_buf, null) orelse unreachable;
+    try std.testing.expectEqual(@as(usize, 20), len);
+}
+
+test "find_path: corridor" {
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    var m: map.GameMap = .{
+        .tiles = tiles,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
+    for (0..79) |x| {
+        if (x == 40) continue;
+        m.tiles[19 * 80 + x] = .tree;
+        m.tiles[21 * 80 + x] = .tree;
+    }
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const result = find_path(allocator, &m, .{ .x = 10, .y = 20 }, .{ .x = 50, .y = 20 }, path_buf, null);
+    try std.testing.expect(result != null);
+}
+
+test "find_path: blocked positions" {
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    const m: map.GameMap = .{
+        .tiles = tiles,
+        .width = 80,
+        .height = 40,
+        .player_tc_x = 12,
+        .player_tc_y = 20,
+        .enemy_tc_x = 68,
+        .enemy_tc_y = 20,
+    };
+    const blocked = [_]Pos{ .{ .x = 7, .y = 5 } };
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 7, .y = 5 }, path_buf, &blocked);
+    try std.testing.expect(result == null);
+}
