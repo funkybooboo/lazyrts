@@ -1,6 +1,27 @@
 const std = @import("std");
 const entity = @import("entity.zig");
 
+pub const MAX_MAP_WIDTH: usize = 200;
+pub const MAX_MAP_HEIGHT: usize = 100;
+pub const TC_CLEAR_RADIUS: usize = 5;
+pub const PLAYER_TC_X_PCT: usize = 15;
+pub const ENEMY_TC_X_PCT: usize = 85;
+pub const SECTOR_SIZE: usize = 20;
+pub const BIOME_ROLL_MAX: usize = 99;
+pub const TREE_CLUSTER_PROB: usize = 40;
+pub const WATER_CLUSTER_THRESH: usize = 48;
+pub const TREE_CLUSTER_MIN: usize = 20;
+pub const TREE_CLUSTER_AREA_DIV: usize = 60;
+pub const WATER_CLUSTER_MIN: usize = 18;
+pub const WATER_CLUSTER_AREA_DIV: usize = 70;
+pub const TREE_TC_BUFFER: usize = 2;
+pub const WATER_TC_BUFFER: usize = 4;
+pub const CLUSTER_TC_BUFFER: usize = 1;
+pub const CLUSTER_FRONTIER_CAP: usize = 600;
+pub const DEER_AREA_DIVISOR: usize = 600;
+pub const MIN_DEER: usize = 4;
+pub const CORRIDOR_WIDTH: usize = 2;
+
 pub const Tile = enum(u8) {
     grass = ' ',
     tree = 'T',
@@ -39,10 +60,6 @@ pub const Tile = enum(u8) {
     }
 };
 
-pub const MAX_MAP_WIDTH: usize = 200;
-pub const MAX_MAP_HEIGHT: usize = 100;
-pub const TC_CLEAR_RADIUS: usize = 5;
-
 pub const GameMap = struct {
     tiles: [MAX_MAP_HEIGHT][MAX_MAP_WIDTH]Tile,
     width: u16,
@@ -56,9 +73,9 @@ pub const GameMap = struct {
         const mw: usize = @min(@as(usize, w), MAX_MAP_WIDTH);
         const mh: usize = @min(@as(usize, h), MAX_MAP_HEIGHT);
 
-        const ptx: usize = mw * 15 / 100;
+        const ptx: usize = mw * PLAYER_TC_X_PCT / 100;
         const pty: usize = mh / 2;
-        const etx: usize = @max(mw * 85 / 100, @as(usize, 1));
+        const etx: usize = @max(mw * ENEMY_TC_X_PCT / 100, @as(usize, 1));
         const ety: usize = mh / 2;
 
         var m: GameMap = .{
@@ -87,28 +104,27 @@ pub const GameMap = struct {
 
         const area = @as(usize, mw) * @as(usize, mh);
 
-        const sector_size: usize = 20;
-        const sectors_x = mw / sector_size + 1;
-        const sectors_y = mh / sector_size + 1;
+        const sectors_x = mw / SECTOR_SIZE + 1;
+        const sectors_y = mh / SECTOR_SIZE + 1;
 
         for (0..sectors_y) |sy| {
             for (0..sectors_x) |sx| {
-                const base_x = sx * sector_size + sector_size / 2;
-                const base_y = sy * sector_size + sector_size / 2;
-                const ox = rng.intRangeAtMost(usize, 0, sector_size / 2);
-                const oy = rng.intRangeAtMost(usize, 0, sector_size / 2);
+                const base_x = sx * SECTOR_SIZE + SECTOR_SIZE / 2;
+                const base_y = sy * SECTOR_SIZE + SECTOR_SIZE / 2;
+                const ox = rng.intRangeAtMost(usize, 0, SECTOR_SIZE / 2);
+                const oy = rng.intRangeAtMost(usize, 0, SECTOR_SIZE / 2);
                 const seed_x = @min(base_x + ox, mw - 1);
                 const seed_y = @min(base_y + oy, mh - 1);
 
-                const roll = rng.intRangeAtMost(usize, 0, 99);
-                if (roll < 40) {
-                    const cluster_size = rng.intRangeAtMost(usize, 20, @max(21, area / 60));
-                    if (!m.near_tc(seed_x, seed_y, TC_CLEAR_RADIUS + 2)) {
+                const roll = rng.intRangeAtMost(usize, 0, BIOME_ROLL_MAX);
+                if (roll < TREE_CLUSTER_PROB) {
+                    const cluster_size = rng.intRangeAtMost(usize, TREE_CLUSTER_MIN, @max(TREE_CLUSTER_MIN + 1, area / TREE_CLUSTER_AREA_DIV));
+                    if (!m.near_tc(seed_x, seed_y, TC_CLEAR_RADIUS + TREE_TC_BUFFER)) {
                         m.grow_cluster(seed_x, seed_y, .tree, cluster_size, rng);
                     }
-                } else if (roll < 48) {
-                    const cluster_size = rng.intRangeAtMost(usize, 18, @max(19, area / 70));
-                    if (!m.near_tc(seed_x, seed_y, TC_CLEAR_RADIUS + 4)) {
+                } else if (roll < WATER_CLUSTER_THRESH) {
+                    const cluster_size = rng.intRangeAtMost(usize, WATER_CLUSTER_MIN, @max(WATER_CLUSTER_MIN + 1, area / WATER_CLUSTER_AREA_DIV));
+                    if (!m.near_tc(seed_x, seed_y, TC_CLEAR_RADIUS + WATER_TC_BUFFER)) {
                         m.grow_cluster(seed_x, seed_y, .water, cluster_size, rng);
                     }
                 }
@@ -162,7 +178,7 @@ pub const GameMap = struct {
     }
 
     fn grow_cluster(self: *GameMap, sx: usize, sy: usize, tile: Tile, count: usize, rng: std.Random) void {
-        var frontier: [600]entity.Pos = undefined;
+        var frontier: [CLUSTER_FRONTIER_CAP]entity.Pos = undefined;
         var fhead: usize = 1;
         var ftail: usize = 0;
         frontier[0] = .{ .x = sx, .y = sy };
@@ -174,7 +190,7 @@ pub const GameMap = struct {
             frontier[ftail] = cand;
             ftail += 1;
             if (cand.x < self.width and cand.y < self.height) {
-                if (self.tiles[cand.y][cand.x] == .grass and !self.near_tc(cand.x, cand.y, TC_CLEAR_RADIUS + 1)) {
+                if (self.tiles[cand.y][cand.x] == .grass and !self.near_tc(cand.x, cand.y, TC_CLEAR_RADIUS + CLUSTER_TC_BUFFER)) {
                     self.tiles[cand.y][cand.x] = tile;
                     placed += 1;
                     const offsets = [_]struct { dx: isize, dy: isize }{
@@ -243,17 +259,17 @@ pub const GameMap = struct {
         const ey: isize = @intCast(y1);
 
         while (cx != ex) : (cx += if (ex > cx) 1 else -1) {
-            self.carve_wide(@intCast(cx), @intCast(cy));
+            self.carve_wide(@intCast(cx), @intCast(cy), CORRIDOR_WIDTH);
         }
         while (cy != ey) : (cy += if (ey > cy) 1 else -1) {
-            self.carve_wide(@intCast(cx), @intCast(cy));
+            self.carve_wide(@intCast(cx), @intCast(cy), CORRIDOR_WIDTH);
         }
-        self.carve_wide(@intCast(ex), @intCast(ey));
+        self.carve_wide(@intCast(ex), @intCast(ey), CORRIDOR_WIDTH);
     }
 
-    fn carve_wide(self: *GameMap, cx: usize, cy: usize) void {
-        for (0..2) |dy| {
-            for (0..2) |dx| {
+    fn carve_wide(self: *GameMap, cx: usize, cy: usize, width: usize) void {
+        for (0..width) |dy| {
+            for (0..width) |dx| {
                 const x = cx + dx;
                 const y = cy + dy;
                 if (x < self.width and y < self.height) {
@@ -267,7 +283,7 @@ pub const GameMap = struct {
 
     pub fn deer_count(self: *const GameMap) usize {
         const area = @as(usize, self.width) * @as(usize, self.height);
-        return @max(4, area / 600);
+        return @max(MIN_DEER, area / DEER_AREA_DIVISOR);
     }
 };
 

@@ -2,19 +2,33 @@ const term = @import("terminal.zig");
 const game = @import("game.zig");
 const entity = @import("entity.zig");
 
+const MIN_DRAWER_WIDTH: u16 = 10;
+const RIGHT_PANEL_OFFSET: u16 = 20;
+const SECONDS_PER_MINUTE: usize = 60;
+const COORD_INPUT_OFFSET: u16 = 22;
+
+const BORDER_COLOR = .{ 80, 80, 80 };
+const LABEL_COLOR = .{ 120, 120, 120 };
+const VAL_COLOR = .{ 220, 220, 220 };
+const CYAN_COLOR = .{ 0, 200, 200 };
+const RED_COLOR = .{ 210, 80, 80 };
+const BROWN_COLOR = .{ 170, 130, 60 };
+const DIM_COLOR = .{ 100, 100, 80 };
+const YELLOW_COLOR = .{ 255, 255, 100 };
+
 pub fn draw(canvas: term.Canvas, state: *const game.State) void {
     const y0: u16 = canvas.height() - game.DRAWER_HEIGHT;
     const w = canvas.width();
-    if (w < 10) return;
+    if (w < MIN_DRAWER_WIDTH) return;
 
-    const border: term.Style = .{ .fg = .{ .rgb = .{ 80, 80, 80 } } };
-    const label: term.Style = .{ .fg = .{ .rgb = .{ 120, 120, 120 } } };
-    const val: term.Style = .{ .fg = .{ .rgb = .{ 220, 220, 220 } } };
-    const cyan: term.Style = .{ .fg = .{ .rgb = .{ 0, 200, 200 } } };
-    const red: term.Style = .{ .fg = .{ .rgb = .{ 210, 80, 80 } } };
-    const brown: term.Style = .{ .fg = .{ .rgb = .{ 170, 130, 60 } } };
-    const dim: term.Style = .{ .fg = .{ .rgb = .{ 100, 100, 80 } } };
-    const yellow: term.Style = .{ .fg = .{ .rgb = .{ 255, 255, 100 } } };
+    const border: term.Style = .{ .fg = .{ .rgb = BORDER_COLOR } };
+    const label: term.Style = .{ .fg = .{ .rgb = LABEL_COLOR } };
+    const val: term.Style = .{ .fg = .{ .rgb = VAL_COLOR } };
+    const cyan: term.Style = .{ .fg = .{ .rgb = CYAN_COLOR } };
+    const red: term.Style = .{ .fg = .{ .rgb = RED_COLOR } };
+    const brown: term.Style = .{ .fg = .{ .rgb = BROWN_COLOR } };
+    const dim: term.Style = .{ .fg = .{ .rgb = DIM_COLOR } };
+    const yellow: term.Style = .{ .fg = .{ .rgb = YELLOW_COLOR } };
 
     for (0..w) |x| {
         canvas.write_cell(@intCast(x), y0, "-", border);
@@ -78,10 +92,10 @@ pub fn draw(canvas: term.Canvas, state: *const game.State) void {
         }
     }
 
-    var rx: u16 = w -| 20;
+    var rx: u16 = w -| RIGHT_PANEL_OFFSET;
     const secs = game.elapsed_seconds(state);
-    const mins = secs / 60;
-    const secs_rem = secs % 60;
+    const mins = secs / SECONDS_PER_MINUTE;
+    const secs_rem = secs % SECONDS_PER_MINUTE;
     var time_buf: [8]u8 = undefined;
     var tp: usize = 0;
     if (mins < 10) {
@@ -101,7 +115,7 @@ pub fn draw(canvas: term.Canvas, state: *const game.State) void {
     const pop = game.player_pop(state);
     const cap = game.player_pop_cap(state);
     const counts = game.player_unit_counts(state);
-    rx = w -| 20;
+    rx = w -| RIGHT_PANEL_OFFSET;
     rx = put(canvas, rx, row2, "Pop:", label);
     var pop_buf: [12]u8 = undefined;
     var pp: usize = 0;
@@ -124,7 +138,7 @@ pub fn draw(canvas: term.Canvas, state: *const game.State) void {
     if (state.coord_mode) {
         canvas.write_str(1, row3, "Enter=goto Esc=cancel", dim);
         if (state.coord_len > 0) {
-            canvas.write_str(22, row3, state.coord_buf[0..state.coord_len], yellow);
+            canvas.write_str(COORD_INPUT_OFFSET, row3, state.coord_buf[0..state.coord_len], yellow);
         }
     } else {
         canvas.write_str(1, row3, "hjkl=move T=spawn M=move Tab=select C=coord Q=quit", dim);

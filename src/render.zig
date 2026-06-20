@@ -6,6 +6,12 @@ const entity = @import("entity.zig");
 const drawer = @import("drawer.zig");
 const color = @import("color.zig");
 
+const HEADER_DIM = .{ 140, 140, 140 };
+const HEADER_ACTIVE = .{ 255, 255, 255 };
+const CURSOR_SELECTED_BG = .{ 40, 40, 40 };
+const CURSOR_REVERSED_FG = .{ 20, 20, 20 };
+const BUILDING_TILE_COLOR = .{ 200, 200, 200 };
+
 pub fn draw(canvas: term.Canvas, state: *const game.State) void {
     canvas.clear();
 
@@ -56,20 +62,20 @@ const CellKind = enum { unit, building };
 fn cell_style(kind: CellKind, fg_rgb: [3]u8, is_selected: bool, is_cursor: bool) term.Style {
     const bold = kind == .building or is_selected;
     if (is_selected and is_cursor) {
-        return .{ .fg = .{ .rgb = fg_rgb }, .bg = .{ .rgb = .{ 40, 40, 40 } }, .bold = true };
+        return .{ .fg = .{ .rgb = fg_rgb }, .bg = .{ .rgb = CURSOR_SELECTED_BG }, .bold = true };
     }
     if (is_selected) {
-        return .{ .fg = .{ .rgb = .{ 20, 20, 20 } }, .bg = .{ .rgb = fg_rgb }, .bold = true };
+        return .{ .fg = .{ .rgb = CURSOR_REVERSED_FG }, .bg = .{ .rgb = fg_rgb }, .bold = true };
     }
     if (is_cursor) {
-        return .{ .fg = .{ .rgb = .{ 20, 20, 20 } }, .bg = .{ .rgb = fg_rgb }, .bold = true };
+        return .{ .fg = .{ .rgb = CURSOR_REVERSED_FG }, .bg = .{ .rgb = fg_rgb }, .bold = true };
     }
     return .{ .fg = .{ .rgb = fg_rgb }, .bold = bold };
 }
 
 fn draw_col_headers(canvas: term.Canvas, lw: u16, hh: u16, map_w: u16, state: *const game.State) void {
-    const dim: term.Style = .{ .fg = .{ .rgb = .{ 140, 140, 140 } } };
-    const active: term.Style = .{ .fg = .{ .rgb = .{ 255, 255, 255 } }, .bold = true };
+    const dim: term.Style = .{ .fg = .{ .rgb = HEADER_DIM } };
+    const active: term.Style = .{ .fg = .{ .rgb = HEADER_ACTIVE }, .bold = true };
 
     for (0..map_w) |col| {
         var buf: [3]u8 = undefined;
@@ -85,8 +91,8 @@ fn draw_col_headers(canvas: term.Canvas, lw: u16, hh: u16, map_w: u16, state: *c
 }
 
 fn draw_row_labels(canvas: term.Canvas, lw: u16, hh: u16, map_h: u16, state: *const game.State, max_y: u16) void {
-    const dim: term.Style = .{ .fg = .{ .rgb = .{ 140, 140, 140 } } };
-    const active: term.Style = .{ .fg = .{ .rgb = .{ 255, 255, 255 } }, .bold = true };
+    const dim: term.Style = .{ .fg = .{ .rgb = HEADER_DIM } };
+    const active: term.Style = .{ .fg = .{ .rgb = HEADER_ACTIVE }, .bold = true };
 
     for (0..map_h) |row| {
         const ly: u16 = hh + @as(u16, @intCast(row));
@@ -119,6 +125,6 @@ fn tile_style(t: map.Tile) term.Style {
         .grass => .{},
         .tree => .{ .fg = .{ .rgb = color.tile_colors.tree } },
         .water => .{ .fg = .{ .rgb = color.tile_colors.water } },
-        .town_center, .house, .barracks => .{ .fg = .{ .rgb = .{ 200, 200, 200 } } },
+        .town_center, .house, .barracks => .{ .fg = .{ .rgb = BUILDING_TILE_COLOR } },
     };
 }

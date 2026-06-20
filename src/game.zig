@@ -6,6 +6,21 @@ const pathfinding = @import("pathfinding.zig");
 pub const DRAWER_HEIGHT: u16 = 5;
 pub const LABEL_WIDTH: u16 = 3;
 
+pub const TICKS_PER_SECOND: usize = 10;
+pub const DEFAULT_MAP_WIDTH: u16 = 80;
+pub const DEFAULT_MAP_HEIGHT: u16 = 40;
+pub const MIN_TERM_WIDTH: u16 = 20;
+pub const MIN_TERM_HEIGHT: u16 = 15;
+
+pub const DEER_WANDER_INTERVAL: usize = 15;
+pub const DEER_NEAR_TC_PERCENT: usize = 15;
+pub const DEER_SPAWN_SPREAD: usize = 12;
+pub const DEER_SPAWN_OFFSET: usize = 6;
+pub const DEER_SCATTER_MIN_DIST: usize = 2;
+pub const DEER_SPAWN_SEED_OFFSET: u64 = 999;
+
+pub const POP_PER_HOUSING: usize = 5;
+
 pub fn headerHeight(map_w: usize) u16 {
     var buf: [3]u8 = undefined;
     const letters = col_to_letters(map_w -| 1, &buf);
@@ -28,8 +43,8 @@ pub const State = struct {
     tick_count: usize = 0,
 
     pub fn init(seed: u64, term_w: u16, term_h: u16) State {
-        const tw: usize = if (term_w < 20) 80 else term_w;
-        const th: usize = if (term_h < 15) 40 else term_h;
+        const tw: usize = if (term_w < MIN_TERM_WIDTH) DEFAULT_MAP_WIDTH else term_w;
+        const th: usize = if (term_h < MIN_TERM_HEIGHT) DEFAULT_MAP_HEIGHT else term_h;
 
         const map_w: u16 = if (tw > LABEL_WIDTH) @intCast(tw - LABEL_WIDTH) else 10;
         const hh: u16 = headerHeight(map_w);
@@ -101,7 +116,7 @@ pub fn tick(s: *State) void {
     for (0..s.unit_count) |i| {
         const u = &s.units[i];
         if (u.owner == .neutral and u.state == .idle) {
-            if (s.tick_count % 15 == 0 and rng.random().intRangeAtMost(usize, 0, 2) == 0) {
+            if (s.tick_count % DEER_WANDER_INTERVAL == 0 and rng.random().intRangeAtMost(usize, 0, 2) == 0) {
                 wander_deer(s, i);
             }
         }
@@ -110,7 +125,9 @@ pub fn tick(s: *State) void {
 }
 
 fn wander_deer(s: *State, idx: usize) void {
-    var rng = std.Random.DefaultPrng.init(s.tick_count * 31 + idx * 17 + @as(u64, @intCast(s.units[idx].x)));
+    const SEED_MULT_TICK: u64 = 31;
+    const SEED_MULT_IDX: u64 = 17;
+    var rng = std.Random.DefaultPrng.init(s.tick_count * SEED_MULT_TICK + idx * SEED_MULT_IDX + @as(u64, @intCast(s.units[idx].x)));
     const dirs = [_]struct { dx: isize, dy: isize }{
         .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
         .{ .dx = -1, .dy = 0 }, .{ .dx = 1, .dy = 0 },
@@ -132,18 +149,18 @@ fn wander_deer(s: *State, idx: usize) void {
 
 fn spawn_deer(s: *State) void {
     const total = s.world.deer_count();
-    const near_each = total * 15 / 100;
+    const near_each = total * DEER_NEAR_TC_PERCENT / 100;
     const scattered = total - near_each * 2;
 
-    var rng = std.Random.DefaultPrng.init(s.tick_count + 999);
+    var rng = std.Random.DefaultPrng.init(s.tick_count + DEER_SPAWN_SEED_OFFSET);
 
     var i: usize = 0;
     while (i < near_each) {
         defer i += 1;
-        const ox = rng.random().intRangeAtMost(usize, 0, 12);
-        const oy = rng.random().intRangeAtMost(usize, 0, 12);
-        const ex: isize = @as(isize, @intCast(s.world.player_tc_x)) + @as(isize, @intCast(ox)) - 6;
-        const ey: isize = @as(isize, @intCast(s.world.player_tc_y)) + @as(isize, @intCast(oy)) - 6;
+        const ox = rng.random().intRangeAtMost(usize, 0, DEER_SPAWN_SPREAD);
+        const oy = rng.random().intRangeAtMost(usize, 0, DEER_SPAWN_SPREAD);
+        const ex: isize = @as(isize, @intCast(s.world.player_tc_x)) + @as(isize, @intCast(ox)) - DEER_SPAWN_OFFSET;
+        const ey: isize = @as(isize, @intCast(s.world.player_tc_y)) + @as(isize, @intCast(oy)) - DEER_SPAWN_OFFSET;
         if (ex >= 0 and ey >= 0) {
             const ux: usize = @intCast(ex);
             const uy: usize = @intCast(ey);
@@ -156,10 +173,10 @@ fn spawn_deer(s: *State) void {
     i = 0;
     while (i < near_each) {
         defer i += 1;
-        const ox = rng.random().intRangeAtMost(usize, 0, 12);
-        const oy = rng.random().intRangeAtMost(usize, 0, 12);
-        const ex: isize = @as(isize, @intCast(s.world.enemy_tc_x)) + @as(isize, @intCast(ox)) - 6;
-        const ey: isize = @as(isize, @intCast(s.world.enemy_tc_y)) + @as(isize, @intCast(oy)) - 6;
+        const ox = rng.random().intRangeAtMost(usize, 0, DEER_SPAWN_SPREAD);
+        const oy = rng.random().intRangeAtMost(usize, 0, DEER_SPAWN_SPREAD);
+        const ex: isize = @as(isize, @intCast(s.world.enemy_tc_x)) + @as(isize, @intCast(ox)) - DEER_SPAWN_OFFSET;
+        const ey: isize = @as(isize, @intCast(s.world.enemy_tc_y)) + @as(isize, @intCast(oy)) - DEER_SPAWN_OFFSET;
         if (ex >= 0 and ey >= 0) {
             const ux: usize = @intCast(ex);
             const uy: usize = @intCast(ey);
@@ -174,7 +191,7 @@ fn spawn_deer(s: *State) void {
         defer i += 1;
         const x = rng.random().intRangeAtMost(usize, 0, s.world.width -| 1);
         const y = rng.random().intRangeAtMost(usize, 0, s.world.height -| 1);
-        if (s.world.is_walkable(x, y) and unit_at(s, x, y) == null and !s.world.near_tc(x, y, 2)) {
+        if (s.world.is_walkable(x, y) and unit_at(s, x, y) == null and !s.world.near_tc(x, y, DEER_SCATTER_MIN_DIST)) {
             _ = spawn_unit(s, .deer, .neutral, x, y);
         }
     }
@@ -276,8 +293,8 @@ pub fn player_pop_cap(s: *const State) usize {
     for (0..s.building_count) |i| {
         if (s.buildings[i].owner == .player and s.buildings[i].is_complete()) {
             cap += switch (s.buildings[i].kind) {
-                .town_center => 5,
-                .house => 5,
+                .town_center => POP_PER_HOUSING,
+                .house => POP_PER_HOUSING,
                 else => 0,
             };
         }
@@ -301,7 +318,7 @@ pub fn player_unit_counts(s: *const State) struct { workers: usize, soldiers: us
 }
 
 pub fn elapsed_seconds(s: *const State) usize {
-    return s.tick_count / 10;
+    return s.tick_count / TICKS_PER_SECOND;
 }
 
 pub fn parse_coord(buf: []const u8, len: usize) ?struct { x: usize, y: usize } {
