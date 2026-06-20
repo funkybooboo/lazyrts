@@ -183,8 +183,8 @@ fn wander_deer(s: *State, idx: usize) void {
 
 fn spawn_deer(s: *State) void {
     const total = s.world.deer_count(s.cfg);
-    const near_each = total * s.cfg.deer.near_tc_percent / 100;
-    const scattered = total - near_each * 2;
+    const near_each = @max(s.cfg.deer.min_near_tc, total * s.cfg.deer.near_tc_percent / 100);
+    const scattered = total -| near_each * 2;
 
     var rng = std.Random.DefaultPrng.init(s.tick_count + s.cfg.deer.spawn_seed_offset);
 

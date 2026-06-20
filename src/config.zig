@@ -69,6 +69,7 @@ pub const Config = struct {
     deer: struct {
         wander_interval: usize = 15,
         near_tc_percent: usize = 15,
+        min_near_tc: usize = 3,
         spawn_spread: usize = 12,
         spawn_offset: usize = 6,
         scatter_min_dist: usize = 2,
@@ -80,22 +81,36 @@ pub const Config = struct {
     } = .{},
 
     map_gen: struct {
-        tc_clear_radius: usize = 5,
         player_tc_x_pct: usize = 15,
         enemy_tc_x_pct: usize = 85,
-        sector_size: usize = 20,
-        biome_roll_max: usize = 99,
-        tree_cluster_prob: usize = 40,
-        water_cluster_thresh: usize = 48,
-        tree_cluster_min: usize = 20,
-        tree_cluster_area_div: usize = 60,
-        water_cluster_min: usize = 18,
-        water_cluster_area_div: usize = 70,
+        // TC clear radius: randomized per game
+        tc_clear_min: usize = 6,
+        tc_clear_max: usize = 10,
+        // Sector size: randomized per game (smaller = more clusters, larger = sparser)
+        sector_size_min: usize = 20,
+        sector_size_max: usize = 36,
+        // Biome density: % of sectors that become each type (randomized per game)
+        tree_density_min: usize = 18,
+        tree_density_max: usize = 42,
+        water_density_min: usize = 5,
+        water_density_max: usize = 20,
+        // Cluster sizes: randomized within range
+        tree_cluster_min: usize = 10,
+        tree_cluster_max_div: usize = 40,
+        water_cluster_min: usize = 10,
+        water_cluster_max_div: usize = 50,
+        // TC buffer zones
         tree_tc_buffer: usize = 2,
         water_tc_buffer: usize = 4,
         cluster_tc_buffer: usize = 1,
         cluster_frontier_cap: usize = 600,
         corridor_width: usize = 2,
+        // Scattered trees: % of grass tiles that get lone trees (randomized per game)
+        scatter_tree_min: usize = 1,
+        scatter_tree_max: usize = 6,
+        // Guaranteed starting grove near each TC
+        start_grove_count: usize = 15,
+        start_grove_offset: usize = 2,
     } = .{},
 
     ui: struct {

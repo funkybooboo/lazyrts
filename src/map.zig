@@ -80,37 +80,59 @@ pub const GameMap = struct {
 
         for (tiles) |*t| t.* = .grass;
 
-        m.clear(m.player_tc_x, m.player_tc_y, cfg.map_gen.tc_clear_radius);
-        m.clear(m.enemy_tc_x, m.enemy_tc_y, cfg.map_gen.tc_clear_radius);
+        // Randomized TC clear radius
+        const tc_clear = rng.intRangeAtMost(usize, cfg.map_gen.tc_clear_min, cfg.map_gen.tc_clear_max);
+        m.clear(m.player_tc_x, m.player_tc_y, tc_clear);
+        m.clear(m.enemy_tc_x, m.enemy_tc_y, tc_clear);
+
+        // Randomized sector size per game
+        const sector_size = rng.intRangeAtMost(usize, cfg.map_gen.sector_size_min, cfg.map_gen.sector_size_max);
+        const sectors_x = map_width / sector_size + 1;
+        const sectors_y = map_height / sector_size + 1;
+
+        // Randomized biome probabilities per game
+        const tree_density = rng.intRangeAtMost(usize, cfg.map_gen.tree_density_min, cfg.map_gen.tree_density_max);
+        const water_density = rng.intRangeAtMost(usize, cfg.map_gen.water_density_min, cfg.map_gen.water_density_max);
 
         const area = map_width * map_height;
 
-        const sectors_x = map_width / cfg.map_gen.sector_size + 1;
-        const sectors_y = map_height / cfg.map_gen.sector_size + 1;
-
         for (0..sectors_y) |sector_y| {
             for (0..sectors_x) |sector_x| {
-                const base_x = sector_x * cfg.map_gen.sector_size + cfg.map_gen.sector_size / 2;
-                const base_y = sector_y * cfg.map_gen.sector_size + cfg.map_gen.sector_size / 2;
-                const offset_x = rng.intRangeAtMost(usize, 0, cfg.map_gen.sector_size / 2);
-                const offset_y = rng.intRangeAtMost(usize, 0, cfg.map_gen.sector_size / 2);
+                const base_x = sector_x * sector_size + sector_size / 2;
+                const base_y = sector_y * sector_size + sector_size / 2;
+                const offset_x = rng.intRangeAtMost(usize, 0, sector_size / 2);
+                const offset_y = rng.intRangeAtMost(usize, 0, sector_size / 2);
                 const seed_x = @min(base_x + offset_x, map_width - 1);
                 const seed_y = @min(base_y + offset_y, map_height - 1);
 
-                const roll = rng.intRangeAtMost(usize, 0, cfg.map_gen.biome_roll_max);
-                if (roll < cfg.map_gen.tree_cluster_prob) {
-                    const cluster_size = rng.intRangeAtMost(usize, cfg.map_gen.tree_cluster_min, @max(cfg.map_gen.tree_cluster_min + 1, area / cfg.map_gen.tree_cluster_area_div));
-                    if (!m.near_tc(seed_x, seed_y, cfg.map_gen.tc_clear_radius + cfg.map_gen.tree_tc_buffer)) {
-                        try m.grow_cluster(allocator, seed_x, seed_y, .tree, cluster_size, rng, cfg);
+                const roll = rng.intRangeAtMost(usize, 0, 99);
+                if (roll < tree_density) {
+                    const cluster_min = cfg.map_gen.tree_cluster_min;
+                    const cluster_max = @max(cluster_min + 1, area / cfg.map_gen.tree_cluster_max_div);
+                    const cluster_size = rng.intRangeAtMost(usize, cluster_min, cluster_max);
+                    if (!m.near_tc(seed_x, seed_y, tc_clear + cfg.map_gen.tree_tc_buffer)) {
+                        try m.grow_cluster(allocator, seed_x, seed_y, .tree, cluster_size, rng, tc_clear, cfg);
                     }
-                } else if (roll < cfg.map_gen.water_cluster_thresh) {
-                    const cluster_size = rng.intRangeAtMost(usize, cfg.map_gen.water_cluster_min, @max(cfg.map_gen.water_cluster_min + 1, area / cfg.map_gen.water_cluster_area_div));
-                    if (!m.near_tc(seed_x, seed_y, cfg.map_gen.tc_clear_radius + cfg.map_gen.water_tc_buffer)) {
-                        try m.grow_cluster(allocator, seed_x, seed_y, .water, cluster_size, rng, cfg);
+                } else if (roll < tree_density + water_density) {
+                    const cluster_min = cfg.map_gen.water_cluster_min;
+                    const cluster_max = @max(cluster_min + 1, area / cfg.map_gen.water_cluster_max_div);
+                    const cluster_size = rng.intRangeAtMost(usize, cluster_min, cluster_max);
+                    if (!m.near_tc(seed_x, seed_y, tc_clear + cfg.map_gen.water_tc_buffer)) {
+                        try m.grow_cluster(allocator, seed_x, seed_y, .water, cluster_size, rng, tc_clear, cfg);
                     }
                 }
             }
         }
+
+        // Scattered trees: break up grove monotony
+        const scatter_pct = rng.intRangeAtMost(usize, cfg.map_gen.scatter_tree_min, cfg.map_gen.scatter_tree_max);
+        if (scatter_pct > 0) {
+            m.scatterTrees(rng, scatter_pct, tc_clear);
+        }
+
+        // Guaranteed starting grove near each TC
+        try m.placeStartGrove(allocator, m.player_tc_x, m.player_tc_y, tc_clear, rng, cfg);
+        try m.placeStartGrove(allocator, m.enemy_tc_x, m.enemy_tc_y, tc_clear, rng, cfg);
 
         m.set(m.player_tc_x, m.player_tc_y, .town_center);
         m.set(m.enemy_tc_x, m.enemy_tc_y, .town_center);
@@ -163,7 +185,7 @@ pub const GameMap = struct {
         return false;
     }
 
-    fn grow_cluster(self: *GameMap, allocator: std.mem.Allocator, start_x: usize, start_y: usize, tile: Tile, count: usize, rng: std.Random, cfg: *const config.Config) !void {
+    fn grow_cluster(self: *GameMap, allocator: std.mem.Allocator, start_x: usize, start_y: usize, tile: Tile, count: usize, rng: std.Random, tc_clear: usize, cfg: *const config.Config) !void {
         const frontier_cap = cfg.map_gen.cluster_frontier_cap;
         const frontier = try allocator.alloc(entity.Pos, frontier_cap);
         defer allocator.free(frontier);
@@ -179,7 +201,7 @@ pub const GameMap = struct {
             frontier[ftail] = cand;
             ftail += 1;
             if (cand.x < self.width and cand.y < self.height) {
-                if (self.tiles[cand.y * self.width + cand.x] == .grass and !self.near_tc(cand.x, cand.y, cfg.map_gen.tc_clear_radius + cfg.map_gen.cluster_tc_buffer)) {
+                if (self.tiles[cand.y * self.width + cand.x] == .grass and !self.near_tc(cand.x, cand.y, tc_clear + cfg.map_gen.cluster_tc_buffer)) {
                     self.tiles[cand.y * self.width + cand.x] = tile;
                     placed += 1;
                     const offsets = [_]struct { dx: isize, dy: isize }{
@@ -205,7 +227,43 @@ pub const GameMap = struct {
         }
     }
 
-    fn has_path(self: *const GameMap, allocator: std.mem.Allocator, x0: usize, y0: usize, x1: usize, y1: usize) bool {
+    fn scatterTrees(self: *GameMap, rng: std.Random, pct: usize, tc_clear: usize) void {
+        const area = @as(usize, self.width) * @as(usize, self.height);
+        const target = area * pct / 100;
+        var placed: usize = 0;
+        var attempts: usize = 0;
+        const max_attempts = target * 3;
+        while (placed < target and attempts < max_attempts) : (attempts += 1) {
+            const x = rng.intRangeAtMost(usize, 0, self.width - 1);
+            const y = rng.intRangeAtMost(usize, 0, self.height - 1);
+            if (self.tiles[y * self.width + x] == .grass and !self.near_tc(x, y, tc_clear + 1)) {
+                self.tiles[y * self.width + x] = .tree;
+                placed += 1;
+            }
+        }
+    }
+
+    fn placeStartGrove(self: *GameMap, allocator: std.mem.Allocator, tc_x: usize, tc_y: usize, tc_clear: usize, rng: std.Random, cfg: *const config.Config) !void {
+        const dirs = [_]struct { dx: isize, dy: isize }{
+            .{ .dx = 1, .dy = 0 },
+            .{ .dx = -1, .dy = 0 },
+            .{ .dx = 0, .dy = 1 },
+            .{ .dx = 0, .dy = -1 },
+        };
+        const d = dirs[rng.intRangeAtMost(usize, 0, dirs.len - 1)];
+        const offset = tc_clear + cfg.map_gen.start_grove_offset;
+        const start_x = @as(isize, @intCast(tc_x)) + d.dx * @as(isize, @intCast(offset));
+        const start_y = @as(isize, @intCast(tc_y)) + d.dy * @as(isize, @intCast(offset));
+        if (start_x >= 0 and start_y >= 0) {
+            const sx: usize = @intCast(start_x);
+            const sy: usize = @intCast(start_y);
+            if (sx < self.width and sy < self.height) {
+                try self.grow_cluster(allocator, sx, sy, .tree, cfg.map_gen.start_grove_count, rng, tc_clear, cfg);
+            }
+        }
+    }
+
+    fn has_path(self: *GameMap, allocator: std.mem.Allocator, x0: usize, y0: usize, x1: usize, y1: usize) bool {
         const map_size = @as(usize, self.width) * @as(usize, self.height);
         const visited = allocator.alloc(bool, map_size) catch return false;
         defer allocator.free(visited);
@@ -547,7 +605,7 @@ test "water clusters exist on large maps" {
     const cfg = config.default();
     const allocator = std.testing.allocator;
     var any_water = false;
-    for (0..5) |seed| {
+    for (0..20) |seed| {
         var m = try GameMap.init(allocator, seed, 120, 50, &cfg);
         defer m.deinit(allocator);
         for (0..m.height) |y| {
@@ -557,4 +615,46 @@ test "water clusters exist on large maps" {
         }
     }
     try std.testing.expect(any_water);
+}
+
+test "different seeds produce varying tree counts" {
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var min_trees: usize = std.math.maxInt(usize);
+    var max_trees: usize = 0;
+    for (0..10) |seed| {
+        var m = try GameMap.init(allocator, seed, 80, 40, &cfg);
+        defer m.deinit(allocator);
+        var tree_count: usize = 0;
+        for (0..m.height) |y| {
+            for (0..m.width) |x| {
+                if (m.at(x, y) == .tree) tree_count += 1;
+            }
+        }
+        if (tree_count < min_trees) min_trees = tree_count;
+        if (tree_count > max_trees) max_trees = tree_count;
+    }
+    // Expect at least 30% variance across seeds
+    try std.testing.expect(max_trees > min_trees * 13 / 10);
+}
+
+test "different seeds produce varying water counts" {
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var min_water: usize = std.math.maxInt(usize);
+    var max_water: usize = 0;
+    for (0..10) |seed| {
+        var m = try GameMap.init(allocator, seed, 80, 40, &cfg);
+        defer m.deinit(allocator);
+        var water_count: usize = 0;
+        for (0..m.height) |y| {
+            for (0..m.width) |x| {
+                if (m.at(x, y) == .water) water_count += 1;
+            }
+        }
+        if (water_count < min_water) min_water = water_count;
+        if (water_count > max_water) max_water = water_count;
+    }
+    // Expect some variance (at least 2 tiles difference)
+    try std.testing.expect(max_water >= min_water + 2);
 }
