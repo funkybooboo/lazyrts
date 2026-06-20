@@ -53,6 +53,7 @@ pub const Config = struct {
         max_units: usize = 128,
         max_buildings: usize = 32,
         max_nature: usize = 64,
+        max_blocked: usize = 256,
     } = .{},
     unit_hp: struct {
         worker: u16 = 50,

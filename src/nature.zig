@@ -1,7 +1,7 @@
 const std = @import("std");
 const config = @import("config.zig");
 const unit = @import("unit.zig");
-const game = @import("game.zig");
+const spatial = @import("spatial.zig");
 
 pub const NatureKind = enum {
     deer,
@@ -55,9 +55,9 @@ pub fn wander(n: *Nature, map: anytype, state: anytype, tick_count: usize, idx: 
         const unit_y: usize = @intCast(next_y);
         if (unit_x < map.width and unit_y < map.height and map.is_walkable(unit_x, unit_y)) {
             // Check if not occupied by other entities
-            if (game.unit_at(state, unit_x, unit_y) == null and
-                game.building_at(state, unit_x, unit_y) == null and
-                game.nature_at_except(state, unit_x, unit_y, idx) == null) {
+            if (spatial.unit_at(state, unit_x, unit_y) == null and
+                spatial.building_at(state, unit_x, unit_y) == null and
+                spatial.nature_at_except(state, unit_x, unit_y, idx) == null) {
                 valid_moves[valid_count] = i;
                 valid_count += 1;
             }

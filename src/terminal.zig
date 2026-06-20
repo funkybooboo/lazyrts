@@ -18,6 +18,7 @@ pub const Key = struct {
     kind: KeyKind,
     char_val: u8 = 0,
     ctrl: bool = false,
+    shift: bool = false,
 
     pub const KeyKind = enum {
         char,
@@ -57,6 +58,10 @@ pub const Key = struct {
 
     pub fn is_tab(self: Key) bool {
         return self.kind == .tab;
+    }
+
+    pub fn is_shift_tab(self: Key) bool {
+        return self.kind == .tab and self.shift;
     }
 
     pub fn is_enter(self: Key) bool {
@@ -188,6 +193,7 @@ fn from_vaxis_key(vk: vaxis.Key) Key {
         .kind = kind,
         .char_val = if (kind == .char) @intCast(vk.codepoint) else 0,
         .ctrl = vk.mods.ctrl,
+        .shift = vk.mods.shift,
     };
 }
 

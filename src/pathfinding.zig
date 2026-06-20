@@ -135,6 +135,109 @@ pub fn find_path(allocator: std.mem.Allocator, m: *const map.GameMap, start: Pos
     return null;
 }
 
+pub fn has_path(allocator: std.mem.Allocator, m: *const map.GameMap, start: Pos, goal: Pos) bool {
+    if (start.x == goal.x and start.y == goal.y) return true;
+    if (!m.is_walkable(start.x, start.y)) return false;
+    if (!m.is_walkable(goal.x, goal.y)) return false;
+
+    const map_size = @as(usize, m.width) * @as(usize, m.height);
+    const visited = allocator.alloc(bool, map_size) catch return false;
+    defer allocator.free(visited);
+    const queue = allocator.alloc(Pos, map_size) catch return false;
+    defer allocator.free(queue);
+
+    @memset(visited, false);
+
+    var head: usize = 0;
+    var tail: usize = 0;
+
+    queue[tail] = start;
+    tail += 1;
+    visited[start.y * m.width + start.x] = true;
+
+    const dirs = [_]struct { dx: isize, dy: isize }{
+        .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
+        .{ .dx = -1, .dy = 0 }, .{ .dx = 1, .dy = 0 },
+    };
+
+    while (head < tail) {
+        const cur = queue[head];
+        head += 1;
+        if (cur.x == goal.x and cur.y == goal.y) return true;
+        for (dirs) |d| {
+            const next_x = @as(isize, @intCast(cur.x)) + d.dx;
+            const next_y = @as(isize, @intCast(cur.y)) + d.dy;
+            if (next_x < 0 or next_y < 0) continue;
+            const tile_x: usize = @intCast(next_x);
+            const tile_y: usize = @intCast(next_y);
+            if (tile_x >= m.width or tile_y >= m.height) continue;
+            if (visited[tile_y * m.width + tile_x]) continue;
+            if (!m.is_walkable(tile_x, tile_y)) continue;
+            visited[tile_y * m.width + tile_x] = true;
+            queue[tail] = .{ .x = tile_x, .y = tile_y };
+            tail += 1;
+        }
+    }
+    return false;
+}
+
+pub fn find_nearest_reachable(allocator: std.mem.Allocator, m: *const map.GameMap, goal: Pos, blocked: ?[]const Pos) ?Pos {
+    const map_size = @as(usize, m.width) * @as(usize, m.height);
+    const visited = allocator.alloc(bool, map_size) catch return null;
+    defer allocator.free(visited);
+    const queue = allocator.alloc(Pos, map_size) catch return null;
+    defer allocator.free(queue);
+
+    @memset(visited, false);
+
+    var head: usize = 0;
+    var tail: usize = 0;
+
+    queue[tail] = goal;
+    tail += 1;
+    visited[goal.y * m.width + goal.x] = true;
+
+    const dirs = [_]struct { dx: isize, dy: isize }{
+        .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
+        .{ .dx = -1, .dy = 0 }, .{ .dx = 1, .dy = 0 },
+    };
+
+    while (head < tail) {
+        const cur = queue[head];
+        head += 1;
+
+        if (m.is_walkable(cur.x, cur.y)) {
+            var is_blocked = false;
+            if (blocked) |b| {
+                for (b) |pos| {
+                    if (pos.x == cur.x and pos.y == cur.y) {
+                        is_blocked = true;
+                        break;
+                    }
+                }
+            }
+            if (!is_blocked) {
+                return cur;
+            }
+        }
+
+        for (dirs) |d| {
+            const next_x = @as(isize, @intCast(cur.x)) + d.dx;
+            const next_y = @as(isize, @intCast(cur.y)) + d.dy;
+            if (next_x < 0 or next_y < 0) continue;
+            const tile_x: usize = @intCast(next_x);
+            const tile_y: usize = @intCast(next_y);
+            if (tile_x >= m.width or tile_y >= m.height) continue;
+            if (visited[tile_y * m.width + tile_x]) continue;
+            visited[tile_y * m.width + tile_x] = true;
+            queue[tail] = .{ .x = tile_x, .y = tile_y };
+            tail += 1;
+        }
+    }
+
+    return null;
+}
+
 test "find_path: straight line" {
     const allocator = std.testing.allocator;
     const map_size: usize = 80 * 40;

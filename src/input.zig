@@ -1,5 +1,6 @@
 const terminal = @import("terminal.zig");
 const game = @import("game.zig");
+const coord = @import("coord.zig");
 
 pub fn handle(s: *game.State, key: terminal.Key) void {
     if (s.coord_mode) {
@@ -21,6 +22,8 @@ pub fn handle(s: *game.State, key: terminal.Key) void {
         _ = game.spawn_worker(s);
     } else if (key.is_char('m')) {
         game.move_selected(s);
+    } else if (key.is_shift_tab()) {
+        game.select_prev(s);
     } else if (key.is_tab()) {
         game.select_next(s);
     } else if (key.is_char('c')) {
@@ -37,10 +40,10 @@ fn handle_coord(s: *game.State, key: terminal.Key) void {
     }
 
     if (key.is_enter()) {
-        if (game.parse_coord(s.coord_buf[0..], s.coord_len)) |coord| {
-            if (coord.x < s.world.width and coord.y < s.world.height) {
-                s.cursor_x = coord.x;
-                s.cursor_y = coord.y;
+        if (coord.parse_coord(s.coord_buf[0..], s.coord_len)) |coord_val| {
+            if (coord_val.x < s.world.width and coord_val.y < s.world.height) {
+                s.cursor_x = coord_val.x;
+                s.cursor_y = coord_val.y;
             }
         }
         s.coord_mode = false;

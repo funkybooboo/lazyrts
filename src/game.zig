@@ -6,6 +6,16 @@ const nature = @import("nature.zig");
 const pathfinding = @import("pathfinding.zig");
 const config = @import("config.zig");
 const time = @import("time.zig");
+const coord = @import("coord.zig");
+const spatial = @import("spatial.zig");
+
+pub const parse_coord = coord.parse_coord;
+pub const col_to_letters = coord.col_to_letters;
+pub const unit_at = spatial.unit_at;
+pub const building_at = spatial.building_at;
+pub const nature_at = spatial.nature_at;
+pub const nature_at_except = spatial.nature_at_except;
+pub const occupied = spatial.occupied;
 
 pub fn header_height(map_w: usize) u16 {
     var buf: [3]u8 = undefined;
@@ -73,52 +83,11 @@ pub const State = struct {
             };
         }
 
-        const starting_buildings = [_]struct { tc_x: usize, tc_y: usize, owner: unit.Owner }{
-            .{ .tc_x = s.world.player_tc_x, .tc_y = s.world.player_tc_y, .owner = .player },
-            .{ .tc_x = s.world.enemy_tc_x, .tc_y = s.world.enemy_tc_y, .owner = .enemy },
-        };
-        for (starting_buildings, 0..) |def, i| {
-            s.buildings[i] = .{
-                .x = def.tc_x,
-                .y = def.tc_y,
-                .kind = .town_center,
-                .owner = def.owner,
-                .hp = building.max_hp(.town_center, cfg),
-            };
-        }
-        s.building_count = starting_buildings.len;
+        try init_starting_buildings(&s);
+        try init_starting_workers(&s);
+        try allocate_unit_paths(&s);
 
-        // Place starting workers one at a time so find_spawn sees already-placed units
-        const starting_order = [_]struct { cx: usize, cy: usize, owner: unit.Owner }{
-            .{ .cx = s.world.player_tc_x, .cy = s.world.player_tc_y, .owner = .player },
-            .{ .cx = s.world.player_tc_x, .cy = s.world.player_tc_y, .owner = .player },
-            .{ .cx = s.world.enemy_tc_x, .cy = s.world.enemy_tc_y, .owner = .enemy },
-            .{ .cx = s.world.enemy_tc_x, .cy = s.world.enemy_tc_y, .owner = .enemy },
-        };
-        for (starting_order, 0..) |def, i| {
-            const sp = find_spawn(&s, def.cx, def.cy) orelse continue;
-            s.units[i] = .{
-                .x = sp.x,
-                .y = sp.y,
-                .kind = .worker,
-                .owner = def.owner,
-                .hp = unit.max_hp(.worker, cfg),
-            };
-            s.unit_count = i + 1;
-        }
-
-        for (0..s.unit_count) |i| {
-            s.units[i].path = allocator.alloc(unit.Pos, cfg.entity_limits.max_path) catch {
-                for (0..i) |j| allocator.free(s.units[j].path);
-                s.allocator.free(s.units);
-                s.allocator.free(s.buildings);
-                s.allocator.free(s.nature);
-                s.world.deinit(s.allocator);
-                return error.OutOfMemory;
-            };
-        }
         s.selected_unit = 0;
-
         spawn_deer(&s);
 
         s.cursor_x = s.world.player_tc_x;
@@ -138,6 +107,56 @@ pub const State = struct {
     }
 };
 
+fn init_starting_buildings(s: *State) !void {
+    const starting_buildings = [_]struct { tc_x: usize, tc_y: usize, owner: unit.Owner }{
+        .{ .tc_x = s.world.player_tc_x, .tc_y = s.world.player_tc_y, .owner = .player },
+        .{ .tc_x = s.world.enemy_tc_x, .tc_y = s.world.enemy_tc_y, .owner = .enemy },
+    };
+    for (starting_buildings, 0..) |def, i| {
+        s.buildings[i] = .{
+            .x = def.tc_x,
+            .y = def.tc_y,
+            .kind = .town_center,
+            .owner = def.owner,
+            .hp = building.max_hp(.town_center, s.cfg),
+        };
+    }
+    s.building_count = starting_buildings.len;
+}
+
+fn init_starting_workers(s: *State) !void {
+    const starting_order = [_]struct { cx: usize, cy: usize, owner: unit.Owner }{
+        .{ .cx = s.world.player_tc_x, .cy = s.world.player_tc_y, .owner = .player },
+        .{ .cx = s.world.player_tc_x, .cy = s.world.player_tc_y, .owner = .player },
+        .{ .cx = s.world.enemy_tc_x, .cy = s.world.enemy_tc_y, .owner = .enemy },
+        .{ .cx = s.world.enemy_tc_x, .cy = s.world.enemy_tc_y, .owner = .enemy },
+    };
+    for (starting_order, 0..) |def, i| {
+        const sp = find_spawn(s, def.cx, def.cy) orelse continue;
+        s.units[i] = .{
+            .x = sp.x,
+            .y = sp.y,
+            .kind = .worker,
+            .owner = def.owner,
+            .hp = unit.max_hp(.worker, s.cfg),
+        };
+        s.unit_count = i + 1;
+    }
+}
+
+fn allocate_unit_paths(s: *State) !void {
+    for (0..s.unit_count) |i| {
+        s.units[i].path = s.allocator.alloc(unit.Pos, s.cfg.entity_limits.max_path) catch {
+            for (0..i) |j| s.allocator.free(s.units[j].path);
+            s.allocator.free(s.units);
+            s.allocator.free(s.buildings);
+            s.allocator.free(s.nature);
+            s.world.deinit(s.allocator);
+            return error.OutOfMemory;
+        };
+    }
+}
+
 pub fn move_cursor(s: *State, dx: isize, dy: isize) void {
     const max_x: isize = @intCast(s.world.width -| 1);
     const max_y: isize = @intCast(s.world.height -| 1);
@@ -149,69 +168,27 @@ pub fn move_cursor(s: *State, dx: isize, dy: isize) void {
 
 pub fn tick(s: *State) void {
     s.tick_count += 1;
-    
-    // Collect blocked positions for pathfinding
-    var blocked_positions: [256]unit.Pos = undefined;
-    var blocked_count: usize = 0;
-    
-    // Add buildings to blocked list
-    for (0..s.building_count) |i| {
-        if (blocked_count < blocked_positions.len) {
-            blocked_positions[blocked_count] = .{ .x = s.buildings[i].x, .y = s.buildings[i].y };
-            blocked_count += 1;
-        }
-    }
-    
-    // Add nature to blocked list
-    for (0..s.nature_count) |i| {
-        if (blocked_count < blocked_positions.len) {
-            blocked_positions[blocked_count] = .{ .x = s.nature[i].x, .y = s.nature[i].y };
-            blocked_count += 1;
-        }
-    }
-    
+
+    var blocked_buf: [256]unit.Pos = undefined;
+
     for (0..s.unit_count) |i| {
         const u = &s.units[i];
         if (u.state == .moving) {
             if (u.path_idx < u.path_len) {
                 const next = u.path[u.path_idx];
-                // Check if blocked by any entity
                 var blocked = false;
                 if (unit_at(s, next.x, next.y)) |other| {
                     if (other != i) blocked = true;
                 }
                 if (building_at(s, next.x, next.y) != null) blocked = true;
                 if (nature_at(s, next.x, next.y) != null) blocked = true;
-                
+
                 if (blocked) {
-                    // Recalculate path around obstacle
                     if (u.dest) |dest| {
                         const current = u.pos();
-                        
-                        // Add other units to blocked list (except self)
-                        var dynamic_blocked: [256]unit.Pos = undefined;
-                        var dynamic_count: usize = 0;
-                        
-                        // Copy static blocked positions
-                        for (0..blocked_count) |j| {
-                            if (dynamic_count < dynamic_blocked.len) {
-                                dynamic_blocked[dynamic_count] = blocked_positions[j];
-                                dynamic_count += 1;
-                            }
-                        }
-                        
-                        // Add other units
-                        for (0..s.unit_count) |j| {
-                            if (j != i and dynamic_count < dynamic_blocked.len) {
-                                if (dynamic_count < dynamic_blocked.len) {
-                                    dynamic_blocked[dynamic_count] = .{ .x = s.units[j].x, .y = s.units[j].y };
-                                    dynamic_count += 1;
-                                }
-                            }
-                        }
-                        
-                        const blocked_slice = if (dynamic_count > 0) dynamic_blocked[0..dynamic_count] else null;
-                        
+                        const blocked_count = spatial.collect_blocked(s, &blocked_buf, i);
+                        const blocked_slice = if (blocked_count > 0) blocked_buf[0..blocked_count] else null;
+
                         if (pathfinding.find_path(s.allocator, &s.world, current, dest, u.path, blocked_slice)) |new_len| {
                             if (new_len > 0) {
                                 u.path_len = new_len;
@@ -320,42 +297,21 @@ pub fn move_selected(s: *State) void {
     const start = u.pos();
     const goal = unit.Pos{ .x = s.cursor_x, .y = s.cursor_y };
 
-    // Collect blocked positions for pathfinding
-    var blocked_positions: [256]unit.Pos = undefined;
-    var blocked_count: usize = 0;
+    var blocked_buf: [256]unit.Pos = undefined;
+    const blocked_count = spatial.collect_blocked(s, &blocked_buf, si);
+    const blocked_slice = if (blocked_count > 0) blocked_buf[0..blocked_count] else null;
 
-    // Add buildings to blocked list
-    for (0..s.building_count) |i| {
-        if (blocked_count < blocked_positions.len) {
-            blocked_positions[blocked_count] = .{ .x = s.buildings[i].x, .y = s.buildings[i].y };
-            blocked_count += 1;
-        }
-    }
-
-    // Add nature to blocked list
-    for (0..s.nature_count) |i| {
-        if (blocked_count < blocked_positions.len) {
-            blocked_positions[blocked_count] = .{ .x = s.nature[i].x, .y = s.nature[i].y };
-            blocked_count += 1;
-        }
-    }
-
-    // Add other units to blocked list (excluding self)
-    for (0..s.unit_count) |i| {
-        if (i != si and blocked_count < blocked_positions.len) {
-            blocked_positions[blocked_count] = .{ .x = s.units[i].x, .y = s.units[i].y };
-            blocked_count += 1;
-        }
-    }
-
-    const blocked_slice = if (blocked_count > 0) blocked_positions[0..blocked_count] else null;
-
-    const len = pathfinding.find_path(s.allocator, &s.world, start, goal, u.path, blocked_slice) orelse return;
+    var target = goal;
+    const len = pathfinding.find_path(s.allocator, &s.world, start, goal, u.path, blocked_slice) orelse blk: {
+        const nearest = pathfinding.find_nearest_reachable(s.allocator, &s.world, goal, blocked_slice) orelse return;
+        target = nearest;
+        break :blk pathfinding.find_path(s.allocator, &s.world, start, nearest, u.path, blocked_slice) orelse return;
+    };
     if (len == 0) return;
     u.path_len = len;
     u.path_idx = 0;
     u.state = .moving;
-    u.dest = goal;
+    u.dest = target;
 }
 
 pub fn select_next(s: *State) void {
@@ -379,37 +335,25 @@ pub fn select_next(s: *State) void {
     s.selected_unit = null;
 }
 
-pub fn unit_at(s: *const State, x: usize, y: usize) ?usize {
-    for (0..s.unit_count) |i| {
-        if (s.units[i].x == x and s.units[i].y == y) return i;
+pub fn select_prev(s: *State) void {
+    if (s.unit_count == 0) {
+        s.selected_unit = null;
+        return;
     }
-    return null;
-}
-
-pub fn building_at(s: *const State, x: usize, y: usize) ?usize {
-    for (0..s.building_count) |i| {
-        if (s.buildings[i].x == x and s.buildings[i].y == y) return i;
+    const start: usize = if (s.selected_unit) |sel|
+        if (sel == 0) s.unit_count - 1 else sel - 1
+    else
+        s.unit_count - 1;
+    var i: usize = start;
+    while (true) {
+        if (s.units[i].owner == .player) {
+            s.selected_unit = i;
+            return;
+        }
+        i = if (i == 0) s.unit_count - 1 else i - 1;
+        if (i == start) break;
     }
-    return null;
-}
-
-pub fn nature_at(s: *const State, x: usize, y: usize) ?usize {
-    for (0..s.nature_count) |i| {
-        if (s.nature[i].x == x and s.nature[i].y == y) return i;
-    }
-    return null;
-}
-
-pub fn nature_at_except(s: *const State, x: usize, y: usize, except_idx: usize) ?usize {
-    for (0..s.nature_count) |i| {
-        if (i == except_idx) continue;
-        if (s.nature[i].x == x and s.nature[i].y == y) return i;
-    }
-    return null;
-}
-
-pub fn occupied(s: *const State, x: usize, y: usize) bool {
-    return unit_at(s, x, y) != null or building_at(s, x, y) != null or nature_at(s, x, y) != null;
+    s.selected_unit = null;
 }
 
 pub fn player_tc(s: *const State) ?unit.Pos {
@@ -458,39 +402,6 @@ pub fn player_unit_counts(s: *const State) struct { workers: usize, soldiers: us
 
 pub fn elapsed_seconds(s: *const State) usize {
     return time.ticks_to_seconds(s.tick_count, s.cfg.tick_rate);
-}
-
-pub fn parse_coord(buf: []const u8, len: usize) ?struct { x: usize, y: usize } {
-    if (len == 0) return null;
-    var col: usize = 0;
-    var i: usize = 0;
-    while (i < len and buf[i] >= 'A' and buf[i] <= 'Z') : (i += 1) {
-        col = col * 26 + (@as(usize, buf[i] - 'A') + 1);
-    }
-    if (i == 0) return null;
-    col -= 1;
-
-    var row: usize = 0;
-    while (i < len and buf[i] >= '0' and buf[i] <= '9') : (i += 1) {
-        row = row * 10 + (@as(usize, buf[i] - '0'));
-    }
-    if (row == 0) return null;
-    row -= 1;
-
-    return .{ .x = col, .y = row };
-}
-
-pub fn col_to_letters(col: usize, buf: *[3]u8) []const u8 {
-    var n = col + 1;
-    var i: usize = 0;
-    while (n > 0 and i < 3) {
-        n -= 1;
-        buf[i] = 'A' + @as(u8, @intCast(n % 26));
-        n /= 26;
-        i += 1;
-    }
-    std.mem.reverse(u8, buf[0..i]);
-    return buf[0..i];
 }
 
 fn find_spawn(s: *const State, center_x: usize, center_y: usize) ?unit.Pos {
@@ -696,40 +607,6 @@ test "building_at returns null for empty position" {
     try std.testing.expect(building_at(&s, 0, 0) == null);
 }
 
-test "parse_coord basic" {
-    const r = parse_coord("A5", 2).?;
-    try std.testing.expectEqual(@as(usize, 0), r.x);
-    try std.testing.expectEqual(@as(usize, 4), r.y);
-}
-
-test "parse_coord Z26" {
-    const r = parse_coord("Z26", 3).?;
-    try std.testing.expectEqual(@as(usize, 25), r.x);
-    try std.testing.expectEqual(@as(usize, 25), r.y);
-}
-
-test "parse_coord AA1" {
-    const r = parse_coord("AA1", 3).?;
-    try std.testing.expectEqual(@as(usize, 26), r.x);
-    try std.testing.expectEqual(@as(usize, 0), r.y);
-}
-
-test "parse_coord invalid" {
-    try std.testing.expect(parse_coord("5", 1) == null);
-    try std.testing.expect(parse_coord("", 0) == null);
-    try std.testing.expect(parse_coord("A", 1) == null);
-}
-
-test "col_to_letters roundtrip" {
-    var buf: [3]u8 = undefined;
-    try std.testing.expectEqualStrings("A", col_to_letters(0, &buf));
-    try std.testing.expectEqualStrings("Z", col_to_letters(25, &buf));
-    try std.testing.expectEqualStrings("AA", col_to_letters(26, &buf));
-    try std.testing.expectEqualStrings("AB", col_to_letters(27, &buf));
-    try std.testing.expectEqualStrings("AZ", col_to_letters(51, &buf));
-    try std.testing.expectEqualStrings("BA", col_to_letters(52, &buf));
-}
-
 test "player_pop counts player units" {
     const allocator = std.testing.allocator;
     const cfg = config.default();
@@ -892,36 +769,6 @@ test "nature wander over many ticks" {
     }
 }
 
-test "parse_coord B3" {
-    const r = parse_coord("B3", 2).?;
-    try std.testing.expectEqual(@as(usize, 1), r.x);
-    try std.testing.expectEqual(@as(usize, 2), r.y);
-}
-
-test "parse_coord multi-letter" {
-    const r = parse_coord("AB5", 3).?;
-    try std.testing.expectEqual(@as(usize, 27), r.x);
-    try std.testing.expectEqual(@as(usize, 4), r.y);
-}
-
-test "parse_coord no digits returns null" {
-    try std.testing.expect(parse_coord("A", 1) == null);
-}
-
-test "col_to_letters produces valid column letters" {
-    var buf: [3]u8 = undefined;
-    try std.testing.expectEqualStrings("A", col_to_letters(0, &buf));
-    try std.testing.expectEqualStrings("Z", col_to_letters(25, &buf));
-    try std.testing.expectEqualStrings("AA", col_to_letters(26, &buf));
-    for (0..30) |col| {
-        const letters = col_to_letters(col, &buf);
-        try std.testing.expect(letters.len > 0);
-        for (letters) |ch| {
-            try std.testing.expect(ch >= 'A' and ch <= 'Z');
-        }
-    }
-}
-
 test "map dimensions account for labels and drawer" {
     const allocator = std.testing.allocator;
     const cfg = config.default();
@@ -942,7 +789,6 @@ test "units cannot occupy same tile" {
     var s = try State.init(allocator, 42, 80, 45, &cfg);
     defer s.deinit();
     
-    // Check all units have unique positions
     for (0..s.unit_count) |i| {
         for (i + 1..s.unit_count) |j| {
             const same = s.units[i].x == s.units[j].x and s.units[i].y == s.units[j].y;
@@ -957,7 +803,6 @@ test "tick blocks movement into occupied tile" {
     var s = try State.init(allocator, 42, 80, 45, &cfg);
     defer s.deinit();
     
-    // Place unit 0 at (10,10), unit 1 at (11,10)
     s.units[0].x = 10;
     s.units[0].y = 10;
     s.units[0].state = .moving;
@@ -972,7 +817,6 @@ test "tick blocks movement into occupied tile" {
     
     tick(&s);
     
-    // Unit 0 should not have moved
     try std.testing.expectEqual(@as(usize, 10), s.units[0].x);
     try std.testing.expectEqual(@as(usize, 10), s.units[0].y);
     try std.testing.expectEqual(unit.UnitState.moving, s.units[0].state);

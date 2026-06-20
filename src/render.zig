@@ -5,6 +5,8 @@ const map = @import("map.zig");
 const drawer = @import("drawer.zig");
 const color = @import("color.zig");
 const config = @import("config.zig");
+const coord = @import("coord.zig");
+const spatial = @import("spatial.zig");
 
 pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
     canvas.clear();
@@ -31,16 +33,16 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
             const screen_y: u16 = @intCast(header_height + row);
             if (screen_y >= drawer_top) continue;
 
-            if (game.unit_at(state, unit_x, unit_y)) |ui| {
+            if (spatial.unit_at(state, unit_x, unit_y)) |ui| {
                 const u = &state.units[ui];
                 const is_selected = state.selected_unit != null and state.selected_unit.? == ui;
                 const s = cell_style(.unit, color.unit_color(u, cfg), is_selected, is_cursor, cfg);
                 canvas.write_cell(screen_x, screen_y, u.kind.glyph(state.cfg), s);
-            } else if (game.building_at(state, unit_x, unit_y)) |bi| {
+            } else if (spatial.building_at(state, unit_x, unit_y)) |bi| {
                 const b = &state.buildings[bi];
                 const s = cell_style(.building, color.building_color(b, cfg), false, is_cursor, cfg);
                 canvas.write_cell(screen_x, screen_y, b.kind.glyph(state.cfg), s);
-            } else if (game.nature_at(state, unit_x, unit_y)) |ni| {
+            } else if (spatial.nature_at(state, unit_x, unit_y)) |ni| {
                 const n = &state.nature[ni];
                 const s = cell_style(.unit, color.nature_color(n, cfg), false, is_cursor, cfg);
                 canvas.write_cell(screen_x, screen_y, n.kind.glyph(state.cfg), s);
@@ -79,7 +81,7 @@ fn draw_col_headers(canvas: terminal.Canvas, lw: u16, hh: u16, map_w: u16, state
 
     for (0..map_w) |col| {
         var buf: [3]u8 = undefined;
-        const letters = game.col_to_letters(col, &buf);
+        const letters = coord.col_to_letters(col, &buf);
         const is_active = col == state.cursor_x;
         const s: terminal.Style = if (is_active) active else dim;
         const col_x: u16 = @intCast(lw + col);

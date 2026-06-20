@@ -1,5 +1,7 @@
 const terminal = @import("terminal.zig");
 const game = @import("game.zig");
+const coord = @import("coord.zig");
+const spatial = @import("spatial.zig");
 const unit = @import("unit.zig");
 const building = @import("building.zig");
 const config = @import("config.zig");
@@ -36,7 +38,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
     x = put(canvas, x, row1, state.world.at(state.cursor_x, state.cursor_y).label(cfg), val);
 
     var col_buf: [3]u8 = undefined;
-    const col_str = game.col_to_letters(state.cursor_x, &col_buf);
+    const col_str = coord.col_to_letters(state.cursor_x, &col_buf);
     x = put(canvas, x, row1, " ", label);
     x = put(canvas, x, row1, col_str, val);
     var row_num_buf: [8]u8 = undefined;
@@ -58,7 +60,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
             x = put(canvas, x, row2, " ", label);
             x = put(canvas, x, row2, state_label(u.state), val);
         }
-    } else if (game.unit_at(state, state.cursor_x, state.cursor_y)) |ui| {
+    } else if (spatial.unit_at(state, state.cursor_x, state.cursor_y)) |ui| {
         const u = &state.units[ui];
         x = put(canvas, x, row2, kind_label(u.kind, cfg), val);
         x = put(canvas, x, row2, " ", label);
@@ -66,7 +68,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
         var hp_buf2: [12]u8 = undefined;
         x = put(canvas, x, row2, cfg.ui_text.hp_label, label);
         x = put(canvas, x, row2, fmt_hp(&hp_buf2, u.hp, unit.max_hp(u.kind, state.cfg)), val);
-    } else if (game.building_at(state, state.cursor_x, state.cursor_y)) |bi| {
+    } else if (spatial.building_at(state, state.cursor_x, state.cursor_y)) |bi| {
         const b = &state.buildings[bi];
         x = put(canvas, x, row2, b.kind.label(cfg), val);
         x = put(canvas, x, row2, " ", label);

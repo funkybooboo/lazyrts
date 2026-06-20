@@ -1,6 +1,7 @@
 const std = @import("std");
 const unit = @import("unit.zig");
 const config = @import("config.zig");
+const pathfinding = @import("pathfinding.zig");
 
 pub const Tile = enum {
     grass,
@@ -137,7 +138,7 @@ pub const GameMap = struct {
         m.set(m.player_tc_x, m.player_tc_y, .town_center);
         m.set(m.enemy_tc_x, m.enemy_tc_y, .town_center);
 
-        if (!m.has_path(allocator, m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y)) {
+        if (!pathfinding.has_path(allocator, &m, .{ .x = m.player_tc_x, .y = m.player_tc_y }, .{ .x = m.enemy_tc_x, .y = m.enemy_tc_y })) {
             m.carve_corridor(m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y, cfg);
         }
 
@@ -263,47 +264,7 @@ pub const GameMap = struct {
         }
     }
 
-    fn has_path(self: *GameMap, allocator: std.mem.Allocator, x0: usize, y0: usize, x1: usize, y1: usize) bool {
-        const map_size = @as(usize, self.width) * @as(usize, self.height);
-        const visited = allocator.alloc(bool, map_size) catch return false;
-        defer allocator.free(visited);
-        const queue = allocator.alloc(unit.Pos, map_size) catch return false;
-        defer allocator.free(queue);
-        
-        for (visited) |*v| v.* = false;
 
-        var head: usize = 0;
-        var tail: usize = 0;
-
-        queue[tail] = .{ .x = x0, .y = y0 };
-        tail += 1;
-        visited[y0 * self.width + x0] = true;
-
-        const dirs = [_]struct { dx: isize, dy: isize }{
-            .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
-            .{ .dx = -1, .dy = 0 }, .{ .dx = 1, .dy = 0 },
-        };
-
-        while (head < tail) {
-            const cur = queue[head];
-            head += 1;
-            if (cur.x == x1 and cur.y == y1) return true;
-            for (dirs) |d| {
-                const next_x = @as(isize, @intCast(cur.x)) + d.dx;
-                const next_y = @as(isize, @intCast(cur.y)) + d.dy;
-                if (next_x < 0 or next_y < 0) continue;
-                const tile_x: usize = @intCast(next_x);
-                const tile_y: usize = @intCast(next_y);
-                if (tile_x >= self.width or tile_y >= self.height) continue;
-                if (visited[tile_y * self.width + tile_x]) continue;
-                if (!self.tiles[tile_y * self.width + tile_x].is_walkable()) continue;
-                visited[tile_y * self.width + tile_x] = true;
-                queue[tail] = .{ .x = tile_x, .y = tile_y };
-                tail += 1;
-            }
-        }
-        return false;
-    }
 
     fn carve_corridor(self: *GameMap, x0: usize, y0: usize, x1: usize, y1: usize, cfg: *const config.Config) void {
         var cur_x: isize = @intCast(x0);
@@ -438,7 +399,7 @@ test "path exists between TCs" {
     const allocator = std.testing.allocator;
     var m = try GameMap.init(allocator, 42, 80, 40, &cfg);
     defer m.deinit(allocator);
-    try std.testing.expect(m.has_path(allocator, m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y));
+    try std.testing.expect(pathfinding.has_path(allocator, &m, .{ .x = m.player_tc_x, .y = m.player_tc_y }, .{ .x = m.enemy_tc_x, .y = m.enemy_tc_y }));
 }
 
 test "has_path returns false for blocked maps" {
@@ -459,7 +420,7 @@ test "has_path returns false for blocked maps" {
     for (0..10) |y| {
         m.tiles[y * 10 + 5] = .water;
     }
-    try std.testing.expect(!m.has_path(allocator, 0, 0, 9, 9));
+    try std.testing.expect(!pathfinding.has_path(allocator, &m, .{ .x = 0, .y = 0 }, .{ .x = 9, .y = 9 }));
 }
 
 test "deer_count scales with map size" {
@@ -495,7 +456,7 @@ test "init always has path between TCs" {
     for (0..20) |seed| {
         var m = try GameMap.init(allocator, seed, 80, 40, &cfg);
         defer m.deinit(allocator);
-        try std.testing.expect(m.has_path(allocator, m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y));
+        try std.testing.expect(pathfinding.has_path(allocator, &m, .{ .x = m.player_tc_x, .y = m.player_tc_y }, .{ .x = m.enemy_tc_x, .y = m.enemy_tc_y }));
     }
 }
 
