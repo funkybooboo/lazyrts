@@ -122,12 +122,12 @@ pub fn draw(canvas: term.Canvas, state: *const game.State) void {
     rx = put(canvas, rx, row2, s_buf[0..sl], red);
 
     if (state.coord_mode) {
-        canvas.write_str(1, row3, "Enter=go Esc=cancel", dim);
+        canvas.write_str(1, row3, "Enter=goto Esc=cancel", dim);
         if (state.coord_len > 0) {
             canvas.write_str(22, row3, state.coord_buf[0..state.coord_len], yellow);
         }
     } else {
-        canvas.write_str(1, row3, "hjkl=move T=spawn M=move Tab=select G=coord Q=quit", dim);
+        canvas.write_str(1, row3, "hjkl=move T=spawn M=move Tab=select C=coord Q=quit", dim);
     }
 }
 

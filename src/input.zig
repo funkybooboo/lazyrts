@@ -23,7 +23,7 @@ pub fn handle(s: *game.State, key: term.Key) void {
         game.move_selected(s);
     } else if (key.is_tab()) {
         game.select_next(s);
-    } else if (key.is_char('g')) {
+    } else if (key.is_char('c')) {
         s.coord_mode = true;
         s.coord_len = 0;
     }
