@@ -52,10 +52,13 @@ pub const Config = struct {
         max_path: usize = 256,
         max_units: usize = 128,
         max_buildings: usize = 32,
+        max_nature: usize = 64,
     } = .{},
     unit_hp: struct {
         worker: u16 = 50,
         soldier: u16 = 100,
+    } = .{},
+    nature_hp: struct {
         deer: u16 = 25,
     } = .{},
 

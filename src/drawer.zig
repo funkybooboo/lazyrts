@@ -1,6 +1,7 @@
 const terminal = @import("terminal.zig");
 const game = @import("game.zig");
-const entity = @import("entity.zig");
+const unit = @import("unit.zig");
+const building = @import("building.zig");
 const config = @import("config.zig");
 const time = @import("time.zig");
 const fmt = @import("fmt.zig");
@@ -53,7 +54,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
             x = put(canvas, x, row2, owner_label(u.owner), owner_style(u.owner, cyan, red, brown));
             var hp_buf1: [12]u8 = undefined;
             x = put(canvas, x, row2, cfg.ui_text.hp_label, label);
-            x = put(canvas, x, row2, fmt_hp(&hp_buf1, u.hp, entity.unit_max_hp(u.kind, state.cfg)), val);
+            x = put(canvas, x, row2, fmt_hp(&hp_buf1, u.hp, unit.max_hp(u.kind, state.cfg)), val);
             x = put(canvas, x, row2, " ", label);
             x = put(canvas, x, row2, state_label(u.state), val);
         }
@@ -64,7 +65,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
         x = put(canvas, x, row2, owner_label(u.owner), owner_style(u.owner, cyan, red, brown));
         var hp_buf2: [12]u8 = undefined;
         x = put(canvas, x, row2, cfg.ui_text.hp_label, label);
-        x = put(canvas, x, row2, fmt_hp(&hp_buf2, u.hp, entity.unit_max_hp(u.kind, state.cfg)), val);
+        x = put(canvas, x, row2, fmt_hp(&hp_buf2, u.hp, unit.max_hp(u.kind, state.cfg)), val);
     } else if (game.building_at(state, state.cursor_x, state.cursor_y)) |bi| {
         const b = &state.buildings[bi];
         x = put(canvas, x, row2, b.kind.label(cfg), val);
@@ -72,8 +73,8 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
         x = put(canvas, x, row2, owner_label(b.owner), owner_style(b.owner, cyan, red, brown));
         var hp_buf3: [12]u8 = undefined;
         x = put(canvas, x, row2, cfg.ui_text.hp_label, label);
-        x = put(canvas, x, row2, fmt_hp(&hp_buf3, b.hp, entity.building_max_hp(b.kind, state.cfg)), val);
-        if (b.build_progress < entity.BUILD_COMPLETE_PERCENT) {
+        x = put(canvas, x, row2, fmt_hp(&hp_buf3, b.hp, building.max_hp(b.kind, state.cfg)), val);
+        if (b.build_progress < building.BUILD_COMPLETE_PERCENT) {
             x = put(canvas, x, row2, cfg.ui_text.build_label, label);
             var bp_buf: [4]u8 = undefined;
             const bp_len = fmt.format_uint(bp_buf[0..], b.build_progress);
@@ -126,7 +127,7 @@ fn put(canvas: terminal.Canvas, x: u16, y: u16, text: []const u8, s: terminal.St
     return x + @as(u16, @intCast(text.len));
 }
 
-fn owner_style(o: entity.Owner, player: terminal.Style, enemy: terminal.Style, neutral: terminal.Style) terminal.Style {
+fn owner_style(o: unit.Owner, player: terminal.Style, enemy: terminal.Style, neutral: terminal.Style) terminal.Style {
     return switch (o) {
         .player => player,
         .enemy => enemy,
@@ -134,7 +135,7 @@ fn owner_style(o: entity.Owner, player: terminal.Style, enemy: terminal.Style, n
     };
 }
 
-fn state_label(s: entity.UnitState) []const u8 {
+fn state_label(s: unit.UnitState) []const u8 {
     return switch (s) {
         .idle => "idle",
         .moving => "moving",
@@ -150,15 +151,14 @@ fn fmt_hp(buf: []u8, hp: usize, max_hp: usize) []const u8 {
     return buf[0..pos];
 }
 
-fn kind_label(k: entity.UnitKind, cfg: *const config.Config) []const u8 {
+fn kind_label(k: unit.UnitKind, cfg: *const config.Config) []const u8 {
     return switch (k) {
         .worker => cfg.labels.worker,
         .soldier => cfg.labels.soldier,
-        .deer => cfg.labels.deer,
     };
 }
 
-fn owner_label(o: entity.Owner) []const u8 {
+fn owner_label(o: unit.Owner) []const u8 {
     return switch (o) {
         .player => "Player",
         .enemy => "Enemy",

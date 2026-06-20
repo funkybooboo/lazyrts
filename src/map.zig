@@ -1,5 +1,5 @@
 const std = @import("std");
-const entity = @import("entity.zig");
+const unit = @import("unit.zig");
 const config = @import("config.zig");
 
 pub const Tile = enum {
@@ -187,7 +187,7 @@ pub const GameMap = struct {
 
     fn grow_cluster(self: *GameMap, allocator: std.mem.Allocator, start_x: usize, start_y: usize, tile: Tile, count: usize, rng: std.Random, tc_clear: usize, cfg: *const config.Config) !void {
         const frontier_cap = cfg.map_gen.cluster_frontier_cap;
-        const frontier = try allocator.alloc(entity.Pos, frontier_cap);
+        const frontier = try allocator.alloc(unit.Pos, frontier_cap);
         defer allocator.free(frontier);
         
         var fhead: usize = 1;
@@ -267,7 +267,7 @@ pub const GameMap = struct {
         const map_size = @as(usize, self.width) * @as(usize, self.height);
         const visited = allocator.alloc(bool, map_size) catch return false;
         defer allocator.free(visited);
-        const queue = allocator.alloc(entity.Pos, map_size) catch return false;
+        const queue = allocator.alloc(unit.Pos, map_size) catch return false;
         defer allocator.free(queue);
         
         for (visited) |*v| v.* = false;

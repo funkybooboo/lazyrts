@@ -1,8 +1,8 @@
 const std = @import("std");
 const map = @import("map.zig");
-const entity = @import("entity.zig");
+const unit = @import("unit.zig");
 
-const Pos = entity.Pos;
+const Pos = unit.Pos;
 
 fn idx(m: *const map.GameMap, x: usize, y: usize) usize {
     return y * m.width + x;
@@ -14,10 +14,15 @@ fn heuristic(a: Pos, b: Pos) u32 {
     return @intCast(dx + dy);
 }
 
-pub fn find_path(allocator: std.mem.Allocator, m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) ?usize {
+pub fn find_path(allocator: std.mem.Allocator, m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos, blocked: ?[]const Pos) ?usize {
     if (start.x == goal.x and start.y == goal.y) return 0;
     if (!m.is_walkable(goal.x, goal.y)) return null;
     if (!m.is_walkable(start.x, start.y)) return null;
+    if (blocked) |b| {
+        for (b) |pos| {
+            if (pos.x == goal.x and pos.y == goal.y) return null;
+        }
+    }
 
     const map_size = @as(usize, m.width) * @as(usize, m.height);
 
@@ -100,6 +105,19 @@ pub fn find_path(allocator: std.mem.Allocator, m: *const map.GameMap, start: Pos
             const unit_y: usize = @intCast(next_y);
             if (unit_x >= m.width or unit_y >= m.height) continue;
             if (!m.is_walkable(unit_x, unit_y)) continue;
+            
+            // Check if this position is blocked
+            var is_blocked = false;
+            if (blocked) |b| {
+                for (b) |pos| {
+                    if (pos.x == unit_x and pos.y == unit_y) {
+                        is_blocked = true;
+                        break;
+                    }
+                }
+            }
+            if (is_blocked) continue;
+            
             const ni = idx(m, unit_x, unit_y);
             if (closed[ni]) continue;
 
@@ -134,7 +152,7 @@ test "find_path: straight line" {
     };
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const len = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf) orelse unreachable;
+    const len = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null) orelse unreachable;
     try std.testing.expectEqual(@as(usize, 5), len);
     try std.testing.expectEqual(@as(usize, 6), path_buf[0].x);
     try std.testing.expectEqual(@as(usize, 10), path_buf[4].x);
@@ -160,7 +178,7 @@ test "find_path: around obstacle" {
     }
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const len = find_path(allocator, &m, .{ .x = 10, .y = 20 }, .{ .x = 30, .y = 20 }, path_buf) orelse unreachable;
+    const len = find_path(allocator, &m, .{ .x = 10, .y = 20 }, .{ .x = 30, .y = 20 }, path_buf, null) orelse unreachable;
     try std.testing.expect(len > 20);
 }
 
@@ -188,7 +206,7 @@ test "find_path: unreachable" {
     }
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 10 }, path_buf);
+    const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 10 }, path_buf, null);
     try std.testing.expect(result == null);
 }
 
@@ -209,7 +227,7 @@ test "find_path: start equals goal" {
     };
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const len = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 5, .y = 5 }, path_buf) orelse unreachable;
+    const len = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 5, .y = 5 }, path_buf, null) orelse unreachable;
     try std.testing.expectEqual(@as(usize, 0), len);
 }
 
@@ -231,6 +249,6 @@ test "find_path: goal is unwalkable" {
     m.tiles[5 * 80 + 10] = .water;
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf);
+    const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null);
     try std.testing.expect(result == null);
 }

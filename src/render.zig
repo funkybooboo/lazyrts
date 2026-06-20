@@ -2,7 +2,6 @@ const std = @import("std");
 const terminal = @import("terminal.zig");
 const game = @import("game.zig");
 const map = @import("map.zig");
-const entity = @import("entity.zig");
 const drawer = @import("drawer.zig");
 const color = @import("color.zig");
 const config = @import("config.zig");
@@ -41,6 +40,10 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
                 const b = &state.buildings[bi];
                 const s = cell_style(.building, color.building_color(b, cfg), false, is_cursor, cfg);
                 canvas.write_cell(screen_x, screen_y, b.kind.glyph(state.cfg), s);
+            } else if (game.nature_at(state, unit_x, unit_y)) |ni| {
+                const n = &state.nature[ni];
+                const s = cell_style(.unit, color.nature_color(n, cfg), false, is_cursor, cfg);
+                canvas.write_cell(screen_x, screen_y, n.kind.glyph(state.cfg), s);
             } else {
                 const t = state.world.at(unit_x, unit_y);
                 var s = tile_style(t, cfg);

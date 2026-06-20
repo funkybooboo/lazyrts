@@ -1,5 +1,7 @@
 const std = @import("std");
-const entity = @import("entity.zig");
+const unit = @import("unit.zig");
+const building = @import("building.zig");
+const nature = @import("nature.zig");
 const config = @import("config.zig");
 
 pub fn lerp(a: u8, b: u8, t: f32) u8 {
@@ -18,7 +20,7 @@ pub fn lerp_color(full: [3]u8, damaged: [3]u8, ratio: f32) [3]u8 {
 
 pub const EntityClass = enum { unit, building };
 
-pub fn full_hp_color(owner: entity.Owner, class: EntityClass, cfg: *const config.Config) [3]u8 {
+pub fn full_hp_color(owner: unit.Owner, class: EntityClass, cfg: *const config.Config) [3]u8 {
     return switch (owner) {
         .player => switch (class) {
             .unit => cfg.colors.player_unit_full,
@@ -32,7 +34,7 @@ pub fn full_hp_color(owner: entity.Owner, class: EntityClass, cfg: *const config
     };
 }
 
-pub fn damaged_color(owner: entity.Owner, class: EntityClass, cfg: *const config.Config) [3]u8 {
+pub fn damaged_color(owner: unit.Owner, class: EntityClass, cfg: *const config.Config) [3]u8 {
     return switch (owner) {
         .player => switch (class) {
             .unit => cfg.colors.player_unit_damaged,
@@ -46,7 +48,7 @@ pub fn damaged_color(owner: entity.Owner, class: EntityClass, cfg: *const config
     };
 }
 
-pub fn unbuilt_color(owner: entity.Owner, cfg: *const config.Config) [3]u8 {
+pub fn unbuilt_color(owner: unit.Owner, cfg: *const config.Config) [3]u8 {
     return switch (owner) {
         .player => cfg.colors.player_unbuilt,
         .enemy => cfg.colors.enemy_unbuilt,
@@ -59,17 +61,24 @@ pub fn health_ratio(hp: u16, max_hp: u16) f32 {
     return 1.0 - @as(f32, @floatFromInt(hp)) / @as(f32, @floatFromInt(max_hp));
 }
 
-pub fn unit_color(u: *const entity.Unit, cfg: *const config.Config) [3]u8 {
+pub fn unit_color(u: *const unit.Unit, cfg: *const config.Config) [3]u8 {
     const full = full_hp_color(u.owner, .unit, cfg);
     const damaged = damaged_color(u.owner, .unit, cfg);
-    const ratio = health_ratio(u.hp, entity.unit_max_hp(u.kind, cfg));
+    const ratio = health_ratio(u.hp, unit.max_hp(u.kind, cfg));
     return lerp_color(full, damaged, ratio);
 }
 
-pub fn building_color(b: *const entity.Building, cfg: *const config.Config) [3]u8 {
+pub fn nature_color(n: *const nature.Nature, cfg: *const config.Config) [3]u8 {
+    const full = full_hp_color(.neutral, .unit, cfg);
+    const damaged = damaged_color(.neutral, .unit, cfg);
+    const ratio = health_ratio(n.hp, nature.max_hp(n.kind, cfg));
+    return lerp_color(full, damaged, ratio);
+}
+
+pub fn building_color(b: *const building.Building, cfg: *const config.Config) [3]u8 {
     const full = full_hp_color(b.owner, .building, cfg);
     const damaged = damaged_color(b.owner, .building, cfg);
-    const hp_ratio = health_ratio(b.hp, entity.building_max_hp(b.kind, cfg));
+    const hp_ratio = health_ratio(b.hp, building.max_hp(b.kind, cfg));
     if (b.build_progress < 100) {
         const unbuilt = unbuilt_color(b.owner, cfg);
         const build_ratio = 1.0 - @as(f32, @floatFromInt(b.build_progress)) / 100.0;
@@ -164,7 +173,7 @@ test "health_ratio at zero max_hp" {
 
 test "unit_color at full HP equals full_hp_color" {
     const cfg = config.default();
-    const u = entity.Unit{ .x = 0, .y = 0, .kind = .worker, .owner = .player, .hp = 50 };
+    const u = unit.Unit{ .x = 0, .y = 0, .kind = .worker, .owner = .player, .hp = 50 };
     const result = unit_color(&u, &cfg);
     const expected = full_hp_color(.player, .unit, &cfg);
     try std.testing.expectEqual(expected[0], result[0]);
@@ -174,7 +183,7 @@ test "unit_color at full HP equals full_hp_color" {
 
 test "building_color fully built at full HP" {
     const cfg = config.default();
-    const b = entity.Building{ .x = 0, .y = 0, .kind = .town_center, .owner = .player, .hp = 500, .build_progress = 100 };
+    const b = building.Building{ .x = 0, .y = 0, .kind = .town_center, .owner = .player, .hp = 500, .build_progress = 100 };
     const result = building_color(&b, &cfg);
     const expected = full_hp_color(.player, .building, &cfg);
     try std.testing.expectEqual(expected[0], result[0]);
@@ -184,7 +193,7 @@ test "building_color fully built at full HP" {
 
 test "building_color under construction" {
     const cfg = config.default();
-    const b = entity.Building{ .x = 0, .y = 0, .kind = .house, .owner = .player, .hp = 200, .build_progress = 50 };
+    const b = building.Building{ .x = 0, .y = 0, .kind = .house, .owner = .player, .hp = 200, .build_progress = 50 };
     const result = building_color(&b, &cfg);
     const unbuilt = unbuilt_color(.player, &cfg);
     const full = full_hp_color(.player, .building, &cfg);
@@ -196,7 +205,7 @@ test "building_color under construction" {
 
 test "building_color at zero build progress is near unbuilt" {
     const cfg = config.default();
-    const b = entity.Building{ .x = 0, .y = 0, .kind = .house, .owner = .player, .hp = 200, .build_progress = 0 };
+    const b = building.Building{ .x = 0, .y = 0, .kind = .house, .owner = .player, .hp = 200, .build_progress = 0 };
     const result = building_color(&b, &cfg);
     const unbuilt = unbuilt_color(.player, &cfg);
     const full = full_hp_color(.player, .building, &cfg);
@@ -223,8 +232,8 @@ test "enemy color distinct from neutral" {
 
 test "building_color damaged is lighter than full" {
     const cfg = config.default();
-    const b_full = entity.Building{ .x = 0, .y = 0, .kind = .town_center, .owner = .player, .hp = 500, .build_progress = 100 };
-    const b_dmg = entity.Building{ .x = 0, .y = 0, .kind = .town_center, .owner = .player, .hp = 50, .build_progress = 100 };
+    const b_full = building.Building{ .x = 0, .y = 0, .kind = .town_center, .owner = .player, .hp = 500, .build_progress = 100 };
+    const b_dmg = building.Building{ .x = 0, .y = 0, .kind = .town_center, .owner = .player, .hp = 50, .build_progress = 100 };
     const full = building_color(&b_full, &cfg);
     const dmg = building_color(&b_dmg, &cfg);
     const full_sum = @as(u16, full[0]) + full[1] + full[2];
@@ -252,7 +261,7 @@ test "health_ratio at 1 HP out of 100" {
 
 test "unit_color enemy at full HP" {
     const cfg = config.default();
-    const u = entity.Unit{ .x = 0, .y = 0, .kind = .soldier, .owner = .enemy, .hp = 100 };
+    const u = unit.Unit{ .x = 0, .y = 0, .kind = .soldier, .owner = .enemy, .hp = 100 };
     const c = unit_color(&u, &cfg);
     const expected = full_hp_color(.enemy, .unit, &cfg);
     try std.testing.expectEqual(expected[0], c[0]);
@@ -262,8 +271,8 @@ test "unit_color enemy at full HP" {
 
 test "building_color under construction is lighter than complete" {
     const cfg = config.default();
-    const b_full = entity.Building{ .x = 0, .y = 0, .kind = .house, .owner = .player, .hp = 200, .build_progress = 100 };
-    const b_half = entity.Building{ .x = 0, .y = 0, .kind = .house, .owner = .player, .hp = 200, .build_progress = 50 };
+    const b_full = building.Building{ .x = 0, .y = 0, .kind = .house, .owner = .player, .hp = 200, .build_progress = 100 };
+    const b_half = building.Building{ .x = 0, .y = 0, .kind = .house, .owner = .player, .hp = 200, .build_progress = 50 };
     const full = building_color(&b_full, &cfg);
     const half = building_color(&b_half, &cfg);
     const full_sum = @as(u16, full[0]) + full[1] + full[2];

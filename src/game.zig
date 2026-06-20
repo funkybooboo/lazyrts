@@ -1,6 +1,8 @@
 const std = @import("std");
 const map = @import("map.zig");
-const entity = @import("entity.zig");
+const unit = @import("unit.zig");
+const building = @import("building.zig");
+const nature = @import("nature.zig");
 const pathfinding = @import("pathfinding.zig");
 const config = @import("config.zig");
 const time = @import("time.zig");
@@ -17,10 +19,12 @@ pub const State = struct {
     cursor_y: usize = 0,
     quit: bool = false,
     world: map.GameMap,
-    units: []entity.Unit,
+    units: []unit.Unit,
     unit_count: usize = 0,
-    buildings: []entity.Building,
+    buildings: []building.Building,
     building_count: usize = 0,
+    nature: []nature.Nature,
+    nature_count: usize = 0,
     selected_unit: ?usize = null,
     coord_mode: bool = false,
     coord_buf: [5]u8 = @splat(0),
@@ -39,16 +43,19 @@ pub const State = struct {
 
         const world = try map.GameMap.init(allocator, seed, map_w, map_h, cfg);
 
-        const units = try allocator.alloc(entity.Unit, cfg.entity_limits.max_units);
+        const units = try allocator.alloc(unit.Unit, cfg.entity_limits.max_units);
         errdefer allocator.free(units);
-        const buildings = try allocator.alloc(entity.Building, cfg.entity_limits.max_buildings);
+        const buildings = try allocator.alloc(building.Building, cfg.entity_limits.max_buildings);
         errdefer allocator.free(buildings);
+        const nature_arr = try allocator.alloc(nature.Nature, cfg.entity_limits.max_nature);
+        errdefer allocator.free(nature_arr);
 
         var s: State = .{
             .allocator = allocator,
             .world = world,
             .units = units,
             .buildings = buildings,
+            .nature = nature_arr,
             .cfg = cfg,
         };
 
@@ -60,13 +67,13 @@ pub const State = struct {
                 .owner = .player,
                 .hp = 0,
                 .state = .idle,
-                .path = &[_]entity.Pos{},
+                .path = &[_]unit.Pos{},
                 .path_len = 0,
                 .path_idx = 0,
             };
         }
 
-        const starting_buildings = [_]struct { tc_x: usize, tc_y: usize, owner: entity.Owner }{
+        const starting_buildings = [_]struct { tc_x: usize, tc_y: usize, owner: unit.Owner }{
             .{ .tc_x = s.world.player_tc_x, .tc_y = s.world.player_tc_y, .owner = .player },
             .{ .tc_x = s.world.enemy_tc_x, .tc_y = s.world.enemy_tc_y, .owner = .enemy },
         };
@@ -76,35 +83,36 @@ pub const State = struct {
                 .y = def.tc_y,
                 .kind = .town_center,
                 .owner = def.owner,
-                .hp = entity.building_max_hp(.town_center, cfg),
+                .hp = building.max_hp(.town_center, cfg),
             };
         }
         s.building_count = starting_buildings.len;
 
         // Place starting workers one at a time so find_spawn sees already-placed units
-        const starting_order = [_]struct { cx: usize, cy: usize, owner: entity.Owner }{
+        const starting_order = [_]struct { cx: usize, cy: usize, owner: unit.Owner }{
             .{ .cx = s.world.player_tc_x, .cy = s.world.player_tc_y, .owner = .player },
             .{ .cx = s.world.player_tc_x, .cy = s.world.player_tc_y, .owner = .player },
             .{ .cx = s.world.enemy_tc_x, .cy = s.world.enemy_tc_y, .owner = .enemy },
             .{ .cx = s.world.enemy_tc_x, .cy = s.world.enemy_tc_y, .owner = .enemy },
         };
         for (starting_order, 0..) |def, i| {
-            const sp = find_spawn(&s, def.cx, def.cy);
+            const sp = find_spawn(&s, def.cx, def.cy) orelse continue;
             s.units[i] = .{
                 .x = sp.x,
                 .y = sp.y,
                 .kind = .worker,
                 .owner = def.owner,
-                .hp = entity.unit_max_hp(.worker, cfg),
+                .hp = unit.max_hp(.worker, cfg),
             };
             s.unit_count = i + 1;
         }
 
         for (0..s.unit_count) |i| {
-            s.units[i].path = allocator.alloc(entity.Pos, cfg.entity_limits.max_path) catch {
+            s.units[i].path = allocator.alloc(unit.Pos, cfg.entity_limits.max_path) catch {
                 for (0..i) |j| allocator.free(s.units[j].path);
                 s.allocator.free(s.units);
                 s.allocator.free(s.buildings);
+                s.allocator.free(s.nature);
                 s.world.deinit(s.allocator);
                 return error.OutOfMemory;
             };
@@ -125,6 +133,7 @@ pub const State = struct {
         }
         self.allocator.free(self.units);
         self.allocator.free(self.buildings);
+        self.allocator.free(self.nature);
         self.world.deinit(self.allocator);
     }
 };
@@ -140,44 +149,88 @@ pub fn move_cursor(s: *State, dx: isize, dy: isize) void {
 
 pub fn tick(s: *State) void {
     s.tick_count += 1;
-    var rng = std.Random.DefaultPrng.init(s.tick_count);
+    
+    // Collect blocked positions for pathfinding
+    var blocked_positions: [256]unit.Pos = undefined;
+    var blocked_count: usize = 0;
+    
+    // Add buildings to blocked list
+    for (0..s.building_count) |i| {
+        if (blocked_count < blocked_positions.len) {
+            blocked_positions[blocked_count] = .{ .x = s.buildings[i].x, .y = s.buildings[i].y };
+            blocked_count += 1;
+        }
+    }
+    
+    // Add nature to blocked list
+    for (0..s.nature_count) |i| {
+        if (blocked_count < blocked_positions.len) {
+            blocked_positions[blocked_count] = .{ .x = s.nature[i].x, .y = s.nature[i].y };
+            blocked_count += 1;
+        }
+    }
+    
     for (0..s.unit_count) |i| {
         const u = &s.units[i];
-        if (u.owner == .neutral and u.state == .idle) {
-            if (s.tick_count % s.cfg.deer.wander_interval == 0 and rng.random().intRangeAtMost(usize, 0, 2) == 0) {
-                wander_deer(s, i);
-            }
-        }
         if (u.state == .moving) {
             if (u.path_idx < u.path_len) {
                 const next = u.path[u.path_idx];
+                // Check if blocked by any entity
+                var blocked = false;
                 if (unit_at(s, next.x, next.y)) |other| {
-                    if (other != i) continue;
+                    if (other != i) blocked = true;
+                }
+                if (building_at(s, next.x, next.y) != null) blocked = true;
+                if (nature_at(s, next.x, next.y) != null) blocked = true;
+                
+                if (blocked) {
+                    // Recalculate path around obstacle
+                    if (u.dest) |dest| {
+                        const current = u.pos();
+                        
+                        // Add other units to blocked list (except self)
+                        var dynamic_blocked: [256]unit.Pos = undefined;
+                        var dynamic_count: usize = 0;
+                        
+                        // Copy static blocked positions
+                        for (0..blocked_count) |j| {
+                            if (dynamic_count < dynamic_blocked.len) {
+                                dynamic_blocked[dynamic_count] = blocked_positions[j];
+                                dynamic_count += 1;
+                            }
+                        }
+                        
+                        // Add other units
+                        for (0..s.unit_count) |j| {
+                            if (j != i and dynamic_count < dynamic_blocked.len) {
+                                if (dynamic_count < dynamic_blocked.len) {
+                                    dynamic_blocked[dynamic_count] = .{ .x = s.units[j].x, .y = s.units[j].y };
+                                    dynamic_count += 1;
+                                }
+                            }
+                        }
+                        
+                        const blocked_slice = if (dynamic_count > 0) dynamic_blocked[0..dynamic_count] else null;
+                        
+                        if (pathfinding.find_path(s.allocator, &s.world, current, dest, u.path, blocked_slice)) |new_len| {
+                            if (new_len > 0) {
+                                u.path_len = new_len;
+                                u.path_idx = 0;
+                            } else {
+                                u.state = .idle;
+                            }
+                        } else {
+                            u.state = .idle;
+                        }
+                    }
+                    continue;
                 }
             }
         }
         u.step();
     }
-}
-
-fn wander_deer(s: *State, idx: usize) void {
-    var rng = std.Random.DefaultPrng.init(s.tick_count * s.cfg.deer.seed_mult_tick + idx * s.cfg.deer.seed_mult_idx + @as(u64, @intCast(s.units[idx].x)));
-    const dirs = [_]struct { dx: isize, dy: isize }{
-        .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
-        .{ .dx = -1, .dy = 0 }, .{ .dx = 1, .dy = 0 },
-    };
-    const d = rng.random().intRangeAtMost(usize, 0, 3);
-    const next_x = @as(isize, @intCast(s.units[idx].x)) + dirs[d].dx;
-    const next_y = @as(isize, @intCast(s.units[idx].y)) + dirs[d].dy;
-    if (next_x >= 0 and next_y >= 0) {
-        const unit_x: usize = @intCast(next_x);
-        const unit_y: usize = @intCast(next_y);
-        if (unit_x < s.world.width and unit_y < s.world.height and s.world.is_walkable(unit_x, unit_y)) {
-            if (unit_at(s, unit_x, unit_y) == null) {
-                s.units[idx].x = unit_x;
-                s.units[idx].y = unit_y;
-            }
-        }
+    for (0..s.nature_count) |i| {
+        nature.wander(&s.nature[i], s.world, s, s.tick_count, i, s.cfg);
     }
 }
 
@@ -203,8 +256,8 @@ fn spawn_deer(s: *State) void {
             if (end_x >= 0 and end_y >= 0) {
                 const unit_x: usize = @intCast(end_x);
                 const unit_y: usize = @intCast(end_y);
-                if (unit_x < s.world.width and unit_y < s.world.height and s.world.is_walkable(unit_x, unit_y) and unit_at(s, unit_x, unit_y) == null) {
-                    _ = spawn_unit(s, .deer, .neutral, unit_x, unit_y);
+                if (unit_x < s.world.width and unit_y < s.world.height and s.world.is_walkable(unit_x, unit_y) and !occupied(s, unit_x, unit_y)) {
+                    _ = spawn_nature(s, .deer, unit_x, unit_y);
                 }
             }
         }
@@ -215,24 +268,36 @@ fn spawn_deer(s: *State) void {
         defer i += 1;
         const x = rng.random().intRangeAtMost(usize, 0, s.world.width -| 1);
         const y = rng.random().intRangeAtMost(usize, 0, s.world.height -| 1);
-        if (s.world.is_walkable(x, y) and unit_at(s, x, y) == null and !s.world.near_tc(x, y, s.cfg.deer.scatter_min_dist)) {
-            _ = spawn_unit(s, .deer, .neutral, x, y);
+        if (s.world.is_walkable(x, y) and !occupied(s, x, y) and !s.world.near_tc(x, y, s.cfg.deer.scatter_min_dist)) {
+            _ = spawn_nature(s, .deer, x, y);
         }
     }
 }
 
-pub fn spawn_unit(s: *State, kind: entity.UnitKind, owner: entity.Owner, center_x: usize, center_y: usize) bool {
+pub fn spawn_nature(s: *State, kind: nature.NatureKind, x: usize, y: usize) bool {
+    if (s.nature_count >= s.cfg.entity_limits.max_nature) return false;
+    s.nature[s.nature_count] = .{
+        .x = x,
+        .y = y,
+        .kind = kind,
+        .hp = nature.max_hp(kind, s.cfg),
+    };
+    s.nature_count += 1;
+    return true;
+}
+
+pub fn spawn_unit(s: *State, kind: unit.UnitKind, owner: unit.Owner, center_x: usize, center_y: usize) bool {
     if (s.unit_count >= s.cfg.entity_limits.max_units) return false;
 
-    const spawn = find_spawn(s, center_x, center_y);
+    const spawn = find_spawn(s, center_x, center_y) orelse return false;
 
-    const path_buf = s.allocator.alloc(entity.Pos, s.cfg.entity_limits.max_path) catch return false;
+    const path_buf = s.allocator.alloc(unit.Pos, s.cfg.entity_limits.max_path) catch return false;
     s.units[s.unit_count] = .{
         .x = spawn.x,
         .y = spawn.y,
         .kind = kind,
         .owner = owner,
-        .hp = entity.unit_max_hp(kind, s.cfg),
+        .hp = unit.max_hp(kind, s.cfg),
         .path = path_buf,
     };
     if (owner == .player) {
@@ -253,13 +318,44 @@ pub fn move_selected(s: *State) void {
     if (u.owner != .player) return;
 
     const start = u.pos();
-    const goal = entity.Pos{ .x = s.cursor_x, .y = s.cursor_y };
+    const goal = unit.Pos{ .x = s.cursor_x, .y = s.cursor_y };
 
-    const len = pathfinding.find_path(s.allocator, &s.world, start, goal, u.path) orelse return;
+    // Collect blocked positions for pathfinding
+    var blocked_positions: [256]unit.Pos = undefined;
+    var blocked_count: usize = 0;
+
+    // Add buildings to blocked list
+    for (0..s.building_count) |i| {
+        if (blocked_count < blocked_positions.len) {
+            blocked_positions[blocked_count] = .{ .x = s.buildings[i].x, .y = s.buildings[i].y };
+            blocked_count += 1;
+        }
+    }
+
+    // Add nature to blocked list
+    for (0..s.nature_count) |i| {
+        if (blocked_count < blocked_positions.len) {
+            blocked_positions[blocked_count] = .{ .x = s.nature[i].x, .y = s.nature[i].y };
+            blocked_count += 1;
+        }
+    }
+
+    // Add other units to blocked list (excluding self)
+    for (0..s.unit_count) |i| {
+        if (i != si and blocked_count < blocked_positions.len) {
+            blocked_positions[blocked_count] = .{ .x = s.units[i].x, .y = s.units[i].y };
+            blocked_count += 1;
+        }
+    }
+
+    const blocked_slice = if (blocked_count > 0) blocked_positions[0..blocked_count] else null;
+
+    const len = pathfinding.find_path(s.allocator, &s.world, start, goal, u.path, blocked_slice) orelse return;
     if (len == 0) return;
     u.path_len = len;
     u.path_idx = 0;
     u.state = .moving;
+    u.dest = goal;
 }
 
 pub fn select_next(s: *State) void {
@@ -297,7 +393,26 @@ pub fn building_at(s: *const State, x: usize, y: usize) ?usize {
     return null;
 }
 
-pub fn player_tc(s: *const State) ?entity.Pos {
+pub fn nature_at(s: *const State, x: usize, y: usize) ?usize {
+    for (0..s.nature_count) |i| {
+        if (s.nature[i].x == x and s.nature[i].y == y) return i;
+    }
+    return null;
+}
+
+pub fn nature_at_except(s: *const State, x: usize, y: usize, except_idx: usize) ?usize {
+    for (0..s.nature_count) |i| {
+        if (i == except_idx) continue;
+        if (s.nature[i].x == x and s.nature[i].y == y) return i;
+    }
+    return null;
+}
+
+pub fn occupied(s: *const State, x: usize, y: usize) bool {
+    return unit_at(s, x, y) != null or building_at(s, x, y) != null or nature_at(s, x, y) != null;
+}
+
+pub fn player_tc(s: *const State) ?unit.Pos {
     for (0..s.building_count) |i| {
         if (s.buildings[i].kind == .town_center and s.buildings[i].owner == .player) {
             return .{ .x = s.buildings[i].x, .y = s.buildings[i].y };
@@ -335,7 +450,6 @@ pub fn player_unit_counts(s: *const State) struct { workers: usize, soldiers: us
             switch (s.units[i].kind) {
                 .worker => worker_count += 1,
                 .soldier => soldier_count += 1,
-                else => {},
             }
         }
     }
@@ -379,7 +493,7 @@ pub fn col_to_letters(col: usize, buf: *[3]u8) []const u8 {
     return buf[0..i];
 }
 
-fn find_spawn(s: *const State, center_x: usize, center_y: usize) entity.Pos {
+fn find_spawn(s: *const State, center_x: usize, center_y: usize) ?unit.Pos {
     const offsets = [_]struct { dx: isize, dy: isize }{
         .{ .dx = 1, .dy = 0 },  .{ .dx = -1, .dy = 0 },
         .{ .dx = 0, .dy = 1 },  .{ .dx = 0, .dy = -1 },
@@ -394,10 +508,10 @@ fn find_spawn(s: *const State, center_x: usize, center_y: usize) entity.Pos {
         const uy: usize = @intCast(next_y);
         if (ux >= s.world.width or uy >= s.world.height) continue;
         if (!s.world.is_walkable(ux, uy)) continue;
-        if (unit_at(s, ux, uy) != null) continue;
+        if (occupied(s, ux, uy)) continue;
         return .{ .x = ux, .y = uy };
     }
-    return .{ .x = center_x, .y = center_y };
+    return null;
 }
 
 test "move_cursor clamps to bounds" {
@@ -432,10 +546,10 @@ test "init places both TCs as buildings" {
         mut_s.deinit();
     }
     try std.testing.expectEqual(@as(usize, 2), s.building_count);
-    try std.testing.expectEqual(entity.BuildingKind.town_center, s.buildings[0].kind);
-    try std.testing.expectEqual(entity.Owner.player, s.buildings[0].owner);
-    try std.testing.expectEqual(entity.BuildingKind.town_center, s.buildings[1].kind);
-    try std.testing.expectEqual(entity.Owner.enemy, s.buildings[1].owner);
+    try std.testing.expectEqual(building.BuildingKind.town_center, s.buildings[0].kind);
+    try std.testing.expectEqual(unit.Owner.player, s.buildings[0].owner);
+    try std.testing.expectEqual(building.BuildingKind.town_center, s.buildings[1].kind);
+    try std.testing.expectEqual(unit.Owner.enemy, s.buildings[1].owner);
 }
 
 test "init spawns starting workers" {
@@ -464,11 +578,7 @@ test "init spawns deer" {
         var mut_s = s;
         mut_s.deinit();
     }
-    var deer: usize = 0;
-    for (0..s.unit_count) |i| {
-        if (s.units[i].owner == .neutral) deer += 1;
-    }
-    try std.testing.expect(deer > 0);
+    try std.testing.expect(s.nature_count > 0);
 }
 
 test "init buildings start complete" {
@@ -492,8 +602,8 @@ test "spawn_worker adds unit and selects it" {
     const before = s.unit_count;
     try std.testing.expect(spawn_worker(&s));
     try std.testing.expectEqual(before + 1, s.unit_count);
-    try std.testing.expectEqual(entity.UnitKind.worker, s.units[s.unit_count - 1].kind);
-    try std.testing.expectEqual(entity.Owner.player, s.units[s.unit_count - 1].owner);
+    try std.testing.expectEqual(unit.UnitKind.worker, s.units[s.unit_count - 1].kind);
+    try std.testing.expectEqual(unit.Owner.player, s.units[s.unit_count - 1].owner);
 }
 
 test "tick moves unit along path" {
@@ -511,11 +621,11 @@ test "tick moves unit along path" {
 
     tick(&s);
     try std.testing.expectEqual(@as(usize, 6), s.units[0].x);
-    try std.testing.expectEqual(entity.UnitState.moving, s.units[0].state);
+    try std.testing.expectEqual(unit.UnitState.moving, s.units[0].state);
 
     tick(&s);
     try std.testing.expectEqual(@as(usize, 7), s.units[0].x);
-    try std.testing.expectEqual(entity.UnitState.idle, s.units[0].state);
+    try std.testing.expectEqual(unit.UnitState.idle, s.units[0].state);
 }
 
 test "select_next cycles through player units" {
@@ -659,7 +769,7 @@ test "move_selected sets unit on path" {
         s.world.set(x, s.world.player_tc_y, .grass);
     }
     move_selected(&s);
-    try std.testing.expectEqual(entity.UnitState.moving, s.units[0].state);
+    try std.testing.expectEqual(unit.UnitState.moving, s.units[0].state);
 }
 
 test "move_selected with no selection does nothing" {
@@ -686,7 +796,7 @@ test "move_selected ignores enemy unit" {
     s.cursor_x = 10;
     s.cursor_y = 10;
     move_selected(&s);
-    try std.testing.expectEqual(entity.UnitState.idle, s.units[enemy_idx].state);
+    try std.testing.expectEqual(unit.UnitState.idle, s.units[enemy_idx].state);
 }
 
 test "spawn_unit returns false at capacity" {
@@ -710,7 +820,7 @@ test "elapsed_seconds" {
     try std.testing.expectEqual(@as(usize, 6), elapsed_seconds(&s));
 }
 
-test "select_next skips neutral and enemy units" {
+test "select_next skips enemy units" {
     const allocator = std.testing.allocator;
     const cfg = config.default();
     const s = try State.init(allocator, 42, 80, 45, &cfg);
@@ -768,23 +878,16 @@ test "spawn_unit with enemy owner does not set selection" {
     try std.testing.expectEqual(before, s.selected_unit.?);
 }
 
-test "deer wander over many ticks" {
+test "nature wander over many ticks" {
     const allocator = std.testing.allocator;
     const cfg = config.default();
     var s = try State.init(allocator, 42, 80, 45, &cfg);
     defer s.deinit();
-    var deer_idx: ?usize = null;
-    for (0..s.unit_count) |i| {
-        if (s.units[i].owner == .neutral) {
-            deer_idx = i;
-            break;
-        }
-    }
-    if (deer_idx) |di| {
-        const start_x = s.units[di].x;
-        const start_y = s.units[di].y;
+    if (s.nature_count > 0) {
+        const start_x = s.nature[0].x;
+        const start_y = s.nature[0].y;
         for (0..200) |_| tick(&s);
-        const moved = s.units[di].x != start_x or s.units[di].y != start_y;
+        const moved = s.nature[0].x != start_x or s.nature[0].y != start_y;
         try std.testing.expect(moved);
     }
 }
@@ -872,5 +975,5 @@ test "tick blocks movement into occupied tile" {
     // Unit 0 should not have moved
     try std.testing.expectEqual(@as(usize, 10), s.units[0].x);
     try std.testing.expectEqual(@as(usize, 10), s.units[0].y);
-    try std.testing.expectEqual(entity.UnitState.moving, s.units[0].state);
+    try std.testing.expectEqual(unit.UnitState.moving, s.units[0].state);
 }
