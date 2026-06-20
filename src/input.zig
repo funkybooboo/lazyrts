@@ -1,7 +1,7 @@
-const term = @import("terminal.zig");
+const terminal = @import("terminal.zig");
 const game = @import("game.zig");
 
-pub fn handle(s: *game.State, key: term.Key) void {
+pub fn handle(s: *game.State, key: terminal.Key) void {
     if (s.coord_mode) {
         handle_coord(s, key);
         return;
@@ -29,7 +29,7 @@ pub fn handle(s: *game.State, key: term.Key) void {
     }
 }
 
-fn handle_coord(s: *game.State, key: term.Key) void {
+fn handle_coord(s: *game.State, key: terminal.Key) void {
     if (key.is_escape()) {
         s.coord_mode = false;
         s.coord_len = 0;

@@ -2,94 +2,113 @@ const std = @import("std");
 const map = @import("map.zig");
 const entity = @import("entity.zig");
 const pathfinding = @import("pathfinding.zig");
+const config = @import("config.zig");
+const time = @import("time.zig");
 
-pub const DRAWER_HEIGHT: u16 = 5;
-pub const LABEL_WIDTH: u16 = 3;
-
-pub const TICKS_PER_SECOND: usize = 10;
-pub const DEFAULT_MAP_WIDTH: u16 = 80;
-pub const DEFAULT_MAP_HEIGHT: u16 = 40;
-pub const MIN_TERM_WIDTH: u16 = 20;
-pub const MIN_TERM_HEIGHT: u16 = 15;
-
-pub const DEER_WANDER_INTERVAL: usize = 15;
-pub const DEER_NEAR_TC_PERCENT: usize = 15;
-pub const DEER_SPAWN_SPREAD: usize = 12;
-pub const DEER_SPAWN_OFFSET: usize = 6;
-pub const DEER_SCATTER_MIN_DIST: usize = 2;
-pub const DEER_SPAWN_SEED_OFFSET: u64 = 999;
-
-pub const POP_PER_HOUSING: usize = 5;
-
-pub fn headerHeight(map_w: usize) u16 {
+pub fn header_height(map_w: usize) u16 {
     var buf: [3]u8 = undefined;
     const letters = col_to_letters(map_w -| 1, &buf);
-    return @intCast(letters.len);
+    return @as(u16, @intCast(letters.len));
 }
 
 pub const State = struct {
+    allocator: std.mem.Allocator,
     cursor_x: usize = 0,
     cursor_y: usize = 0,
     quit: bool = false,
     world: map.GameMap,
-    units: [entity.MAX_UNITS]entity.Unit = undefined,
+    units: []entity.Unit,
     unit_count: usize = 0,
-    buildings: [entity.MAX_BUILDINGS]entity.Building = undefined,
+    buildings: []entity.Building,
     building_count: usize = 0,
     selected_unit: ?usize = null,
     coord_mode: bool = false,
     coord_buf: [5]u8 = @splat(0),
     coord_len: usize = 0,
     tick_count: usize = 0,
+    cfg: *const config.Config,
 
-    pub fn init(seed: u64, term_w: u16, term_h: u16) State {
-        const tw: usize = if (term_w < MIN_TERM_WIDTH) DEFAULT_MAP_WIDTH else term_w;
-        const th: usize = if (term_h < MIN_TERM_HEIGHT) DEFAULT_MAP_HEIGHT else term_h;
+    pub fn init(allocator: std.mem.Allocator, seed: u64, term_w: u16, term_h: u16, cfg: *const config.Config) !State {
+        const term_width: usize = if (term_w < cfg.map_dims.min_term_width) cfg.map_dims.default_width else term_w;
+        const term_height: usize = if (term_h < cfg.map_dims.min_term_height) cfg.map_dims.default_height else term_h;
 
-        const map_w: u16 = if (tw > LABEL_WIDTH) @intCast(tw - LABEL_WIDTH) else 10;
-        const hh: u16 = headerHeight(map_w);
-        const map_area_h = th -| DRAWER_HEIGHT -| hh;
+        const map_w: u16 = if (term_width > cfg.ui.label_width) @intCast(term_width - cfg.ui.label_width) else 10;
+        const header_h: u16 = header_height(map_w);
+        const map_area_h = term_height -| cfg.ui.drawer_height -| header_h;
         const map_h: u16 = if (map_area_h > 0) @intCast(map_area_h) else 10;
 
+        const world = try map.GameMap.init(allocator, seed, map_w, map_h, cfg);
+
+        const units = try allocator.alloc(entity.Unit, cfg.entity_limits.max_units);
+        errdefer allocator.free(units);
+        const buildings = try allocator.alloc(entity.Building, cfg.entity_limits.max_buildings);
+        errdefer allocator.free(buildings);
+
         var s: State = .{
-            .world = map.GameMap.init(seed, map_w, map_h),
+            .allocator = allocator,
+            .world = world,
+            .units = units,
+            .buildings = buildings,
+            .cfg = cfg,
         };
 
-        for (&s.units) |*u| u.* = .{
-            .x = 0,
-            .y = 0,
-            .kind = .worker,
-            .owner = .player,
-            .hp = 0,
-            .state = .idle,
-            .path_len = 0,
-            .path_idx = 0,
-        };
+        for (s.units) |*u| {
+            u.* = .{
+                .x = 0,
+                .y = 0,
+                .kind = .worker,
+                .owner = .player,
+                .hp = 0,
+                .state = .idle,
+                .path = &[_]entity.Pos{},
+                .path_len = 0,
+                .path_idx = 0,
+            };
+        }
 
-        s.buildings[0] = .{
-            .x = s.world.player_tc_x,
-            .y = s.world.player_tc_y,
-            .kind = .town_center,
-            .owner = .player,
-            .hp = entity.BuildingKind.town_center.max_hp(),
+        const starting_buildings = [_]struct { tc_x: usize, tc_y: usize, owner: entity.Owner }{
+            .{ .tc_x = s.world.player_tc_x, .tc_y = s.world.player_tc_y, .owner = .player },
+            .{ .tc_x = s.world.enemy_tc_x, .tc_y = s.world.enemy_tc_y, .owner = .enemy },
         };
-        s.buildings[1] = .{
-            .x = s.world.enemy_tc_x,
-            .y = s.world.enemy_tc_y,
-            .kind = .town_center,
-            .owner = .enemy,
-            .hp = entity.BuildingKind.town_center.max_hp(),
+        for (starting_buildings, 0..) |def, i| {
+            s.buildings[i] = .{
+                .x = def.tc_x,
+                .y = def.tc_y,
+                .kind = .town_center,
+                .owner = def.owner,
+                .hp = entity.building_max_hp(.town_center, cfg),
+            };
+        }
+        s.building_count = starting_buildings.len;
+
+        // Place starting workers one at a time so find_spawn sees already-placed units
+        const starting_order = [_]struct { cx: usize, cy: usize, owner: entity.Owner }{
+            .{ .cx = s.world.player_tc_x, .cy = s.world.player_tc_y, .owner = .player },
+            .{ .cx = s.world.player_tc_x, .cy = s.world.player_tc_y, .owner = .player },
+            .{ .cx = s.world.enemy_tc_x, .cy = s.world.enemy_tc_y, .owner = .enemy },
+            .{ .cx = s.world.enemy_tc_x, .cy = s.world.enemy_tc_y, .owner = .enemy },
         };
-        s.building_count = 2;
+        for (starting_order, 0..) |def, i| {
+            const sp = find_spawn(&s, def.cx, def.cy);
+            s.units[i] = .{
+                .x = sp.x,
+                .y = sp.y,
+                .kind = .worker,
+                .owner = def.owner,
+                .hp = entity.unit_max_hp(.worker, cfg),
+            };
+            s.unit_count = i + 1;
+        }
 
-        const p_spawn = find_spawn(&s.world, s.world.player_tc_x, s.world.player_tc_y);
-        const e_spawn = find_spawn(&s.world, s.world.enemy_tc_x, s.world.enemy_tc_y);
-
-        s.units[0] = .{ .x = p_spawn.x, .y = p_spawn.y, .kind = .worker, .owner = .player, .hp = entity.UnitKind.worker.max_hp() };
-        s.units[1] = .{ .x = p_spawn.x, .y = p_spawn.y, .kind = .worker, .owner = .player, .hp = entity.UnitKind.worker.max_hp() };
-        s.units[2] = .{ .x = e_spawn.x, .y = e_spawn.y, .kind = .worker, .owner = .enemy, .hp = entity.UnitKind.worker.max_hp() };
-        s.units[3] = .{ .x = e_spawn.x, .y = e_spawn.y, .kind = .worker, .owner = .enemy, .hp = entity.UnitKind.worker.max_hp() };
-        s.unit_count = 4;
+        for (0..s.unit_count) |i| {
+            s.units[i].path = allocator.alloc(entity.Pos, cfg.entity_limits.max_path) catch {
+                for (0..i) |j| allocator.free(s.units[j].path);
+                s.allocator.free(s.units);
+                s.allocator.free(s.buildings);
+                s.world.deinit(s.allocator);
+                return error.OutOfMemory;
+            };
+        }
         s.selected_unit = 0;
 
         spawn_deer(&s);
@@ -99,15 +118,24 @@ pub const State = struct {
 
         return s;
     }
+
+    pub fn deinit(self: *State) void {
+        for (0..self.unit_count) |i| {
+            self.allocator.free(self.units[i].path);
+        }
+        self.allocator.free(self.units);
+        self.allocator.free(self.buildings);
+        self.world.deinit(self.allocator);
+    }
 };
 
 pub fn move_cursor(s: *State, dx: isize, dy: isize) void {
     const max_x: isize = @intCast(s.world.width -| 1);
     const max_y: isize = @intCast(s.world.height -| 1);
-    const nx = @max(0, @min(@as(isize, @intCast(s.cursor_x)) + dx, max_x));
-    const ny = @max(0, @min(@as(isize, @intCast(s.cursor_y)) + dy, max_y));
-    s.cursor_x = @intCast(nx);
-    s.cursor_y = @intCast(ny);
+    const next_x = @max(0, @min(@as(isize, @intCast(s.cursor_x)) + dx, max_x));
+    const next_y = @max(0, @min(@as(isize, @intCast(s.cursor_y)) + dy, max_y));
+    s.cursor_x = @intCast(next_x);
+    s.cursor_y = @intCast(next_y);
 }
 
 pub fn tick(s: *State) void {
@@ -116,8 +144,16 @@ pub fn tick(s: *State) void {
     for (0..s.unit_count) |i| {
         const u = &s.units[i];
         if (u.owner == .neutral and u.state == .idle) {
-            if (s.tick_count % DEER_WANDER_INTERVAL == 0 and rng.random().intRangeAtMost(usize, 0, 2) == 0) {
+            if (s.tick_count % s.cfg.deer.wander_interval == 0 and rng.random().intRangeAtMost(usize, 0, 2) == 0) {
                 wander_deer(s, i);
+            }
+        }
+        if (u.state == .moving) {
+            if (u.path_idx < u.path_len) {
+                const next = u.path[u.path_idx];
+                if (unit_at(s, next.x, next.y)) |other| {
+                    if (other != i) continue;
+                }
             }
         }
         u.step();
@@ -125,89 +161,79 @@ pub fn tick(s: *State) void {
 }
 
 fn wander_deer(s: *State, idx: usize) void {
-    const SEED_MULT_TICK: u64 = 31;
-    const SEED_MULT_IDX: u64 = 17;
-    var rng = std.Random.DefaultPrng.init(s.tick_count * SEED_MULT_TICK + idx * SEED_MULT_IDX + @as(u64, @intCast(s.units[idx].x)));
+    var rng = std.Random.DefaultPrng.init(s.tick_count * s.cfg.deer.seed_mult_tick + idx * s.cfg.deer.seed_mult_idx + @as(u64, @intCast(s.units[idx].x)));
     const dirs = [_]struct { dx: isize, dy: isize }{
         .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
         .{ .dx = -1, .dy = 0 }, .{ .dx = 1, .dy = 0 },
     };
     const d = rng.random().intRangeAtMost(usize, 0, 3);
-    const nx = @as(isize, @intCast(s.units[idx].x)) + dirs[d].dx;
-    const ny = @as(isize, @intCast(s.units[idx].y)) + dirs[d].dy;
-    if (nx >= 0 and ny >= 0) {
-        const ux: usize = @intCast(nx);
-        const uy: usize = @intCast(ny);
-        if (ux < s.world.width and uy < s.world.height and s.world.is_walkable(ux, uy)) {
-            if (unit_at(s, ux, uy) == null) {
-                s.units[idx].x = ux;
-                s.units[idx].y = uy;
+    const next_x = @as(isize, @intCast(s.units[idx].x)) + dirs[d].dx;
+    const next_y = @as(isize, @intCast(s.units[idx].y)) + dirs[d].dy;
+    if (next_x >= 0 and next_y >= 0) {
+        const unit_x: usize = @intCast(next_x);
+        const unit_y: usize = @intCast(next_y);
+        if (unit_x < s.world.width and unit_y < s.world.height and s.world.is_walkable(unit_x, unit_y)) {
+            if (unit_at(s, unit_x, unit_y) == null) {
+                s.units[idx].x = unit_x;
+                s.units[idx].y = unit_y;
             }
         }
     }
 }
 
 fn spawn_deer(s: *State) void {
-    const total = s.world.deer_count();
-    const near_each = total * DEER_NEAR_TC_PERCENT / 100;
+    const total = s.world.deer_count(s.cfg);
+    const near_each = total * s.cfg.deer.near_tc_percent / 100;
     const scattered = total - near_each * 2;
 
-    var rng = std.Random.DefaultPrng.init(s.tick_count + DEER_SPAWN_SEED_OFFSET);
+    var rng = std.Random.DefaultPrng.init(s.tick_count + s.cfg.deer.spawn_seed_offset);
+
+    const tc_positions = [_]struct { x: usize, y: usize }{
+        .{ .x = s.world.player_tc_x, .y = s.world.player_tc_y },
+        .{ .x = s.world.enemy_tc_x, .y = s.world.enemy_tc_y },
+    };
+
+    for (tc_positions) |tc| {
+        var j: usize = 0;
+        while (j < near_each) : (j += 1) {
+            const offset_x = rng.random().intRangeAtMost(usize, 0, s.cfg.deer.spawn_spread);
+            const offset_y = rng.random().intRangeAtMost(usize, 0, s.cfg.deer.spawn_spread);
+            const end_x: isize = @as(isize, @intCast(tc.x)) + @as(isize, @intCast(offset_x)) - @as(isize, @intCast(s.cfg.deer.spawn_offset));
+            const end_y: isize = @as(isize, @intCast(tc.y)) + @as(isize, @intCast(offset_y)) - @as(isize, @intCast(s.cfg.deer.spawn_offset));
+            if (end_x >= 0 and end_y >= 0) {
+                const unit_x: usize = @intCast(end_x);
+                const unit_y: usize = @intCast(end_y);
+                if (unit_x < s.world.width and unit_y < s.world.height and s.world.is_walkable(unit_x, unit_y) and unit_at(s, unit_x, unit_y) == null) {
+                    _ = spawn_unit(s, .deer, .neutral, unit_x, unit_y);
+                }
+            }
+        }
+    }
 
     var i: usize = 0;
-    while (i < near_each) {
-        defer i += 1;
-        const ox = rng.random().intRangeAtMost(usize, 0, DEER_SPAWN_SPREAD);
-        const oy = rng.random().intRangeAtMost(usize, 0, DEER_SPAWN_SPREAD);
-        const ex: isize = @as(isize, @intCast(s.world.player_tc_x)) + @as(isize, @intCast(ox)) - DEER_SPAWN_OFFSET;
-        const ey: isize = @as(isize, @intCast(s.world.player_tc_y)) + @as(isize, @intCast(oy)) - DEER_SPAWN_OFFSET;
-        if (ex >= 0 and ey >= 0) {
-            const ux: usize = @intCast(ex);
-            const uy: usize = @intCast(ey);
-            if (ux < s.world.width and uy < s.world.height and s.world.is_walkable(ux, uy) and unit_at(s, ux, uy) == null) {
-                _ = spawn_unit(s, .deer, .neutral, ux, uy);
-            }
-        }
-    }
-
-    i = 0;
-    while (i < near_each) {
-        defer i += 1;
-        const ox = rng.random().intRangeAtMost(usize, 0, DEER_SPAWN_SPREAD);
-        const oy = rng.random().intRangeAtMost(usize, 0, DEER_SPAWN_SPREAD);
-        const ex: isize = @as(isize, @intCast(s.world.enemy_tc_x)) + @as(isize, @intCast(ox)) - DEER_SPAWN_OFFSET;
-        const ey: isize = @as(isize, @intCast(s.world.enemy_tc_y)) + @as(isize, @intCast(oy)) - DEER_SPAWN_OFFSET;
-        if (ex >= 0 and ey >= 0) {
-            const ux: usize = @intCast(ex);
-            const uy: usize = @intCast(ey);
-            if (ux < s.world.width and uy < s.world.height and s.world.is_walkable(ux, uy) and unit_at(s, ux, uy) == null) {
-                _ = spawn_unit(s, .deer, .neutral, ux, uy);
-            }
-        }
-    }
-
-    i = 0;
     while (i < scattered) {
         defer i += 1;
         const x = rng.random().intRangeAtMost(usize, 0, s.world.width -| 1);
         const y = rng.random().intRangeAtMost(usize, 0, s.world.height -| 1);
-        if (s.world.is_walkable(x, y) and unit_at(s, x, y) == null and !s.world.near_tc(x, y, DEER_SCATTER_MIN_DIST)) {
+        if (s.world.is_walkable(x, y) and unit_at(s, x, y) == null and !s.world.near_tc(x, y, s.cfg.deer.scatter_min_dist)) {
             _ = spawn_unit(s, .deer, .neutral, x, y);
         }
     }
 }
 
-pub fn spawn_unit(s: *State, kind: entity.UnitKind, owner: entity.Owner, cx: usize, cy: usize) bool {
-    if (s.unit_count >= entity.MAX_UNITS) return false;
+pub fn spawn_unit(s: *State, kind: entity.UnitKind, owner: entity.Owner, center_x: usize, center_y: usize) bool {
+    if (s.unit_count >= s.cfg.entity_limits.max_units) return false;
 
-    const spawn = find_spawn(&s.world, cx, cy);
+    const spawn = find_spawn(s, center_x, center_y);
 
+    const path_buf = s.allocator.alloc(entity.Pos, s.cfg.entity_limits.max_path) catch return false;
     s.units[s.unit_count] = .{
         .x = spawn.x,
         .y = spawn.y,
         .kind = kind,
         .owner = owner,
-        .hp = kind.max_hp(),
+        .hp = entity.unit_max_hp(kind, s.cfg),
+        .path = path_buf,
     };
     if (owner == .player) {
         s.selected_unit = s.unit_count;
@@ -229,7 +255,7 @@ pub fn move_selected(s: *State) void {
     const start = u.pos();
     const goal = entity.Pos{ .x = s.cursor_x, .y = s.cursor_y };
 
-    const len = pathfinding.find_path(&s.world, start, goal, u.path[0..]) orelse return;
+    const len = pathfinding.find_path(s.allocator, &s.world, start, goal, u.path) orelse return;
     if (len == 0) return;
     u.path_len = len;
     u.path_idx = 0;
@@ -293,8 +319,7 @@ pub fn player_pop_cap(s: *const State) usize {
     for (0..s.building_count) |i| {
         if (s.buildings[i].owner == .player and s.buildings[i].is_complete()) {
             cap += switch (s.buildings[i].kind) {
-                .town_center => POP_PER_HOUSING,
-                .house => POP_PER_HOUSING,
+                .town_center, .house => s.cfg.pop_per_housing,
                 else => 0,
             };
         }
@@ -303,22 +328,22 @@ pub fn player_pop_cap(s: *const State) usize {
 }
 
 pub fn player_unit_counts(s: *const State) struct { workers: usize, soldiers: usize } {
-    var w: usize = 0;
-    var sol: usize = 0;
+    var worker_count: usize = 0;
+    var soldier_count: usize = 0;
     for (0..s.unit_count) |i| {
         if (s.units[i].owner == .player) {
             switch (s.units[i].kind) {
-                .worker => w += 1,
-                .soldier => sol += 1,
+                .worker => worker_count += 1,
+                .soldier => soldier_count += 1,
                 else => {},
             }
         }
     }
-    return .{ .workers = w, .soldiers = sol };
+    return .{ .workers = worker_count, .soldiers = soldier_count };
 }
 
 pub fn elapsed_seconds(s: *const State) usize {
-    return s.tick_count / TICKS_PER_SECOND;
+    return time.ticks_to_seconds(s.tick_count, s.cfg.tick_rate);
 }
 
 pub fn parse_coord(buf: []const u8, len: usize) ?struct { x: usize, y: usize } {
@@ -354,7 +379,7 @@ pub fn col_to_letters(col: usize, buf: *[3]u8) []const u8 {
     return buf[0..i];
 }
 
-fn find_spawn(world: *const map.GameMap, cx: usize, cy: usize) entity.Pos {
+fn find_spawn(s: *const State, center_x: usize, center_y: usize) entity.Pos {
     const offsets = [_]struct { dx: isize, dy: isize }{
         .{ .dx = 1, .dy = 0 },  .{ .dx = -1, .dy = 0 },
         .{ .dx = 0, .dy = 1 },  .{ .dx = 0, .dy = -1 },
@@ -362,19 +387,24 @@ fn find_spawn(world: *const map.GameMap, cx: usize, cy: usize) entity.Pos {
         .{ .dx = 1, .dy = -1 }, .{ .dx = -1, .dy = 1 },
     };
     for (offsets) |o| {
-        const nx: isize = @as(isize, @intCast(cx)) + o.dx;
-        const ny: isize = @as(isize, @intCast(cy)) + o.dy;
-        if (nx < 0 or ny < 0) continue;
-        const ux: usize = @intCast(nx);
-        const uy: usize = @intCast(ny);
-        if (ux >= world.width or uy >= world.height) continue;
-        if (world.is_walkable(ux, uy)) return .{ .x = ux, .y = uy };
+        const next_x: isize = @as(isize, @intCast(center_x)) + o.dx;
+        const next_y: isize = @as(isize, @intCast(center_y)) + o.dy;
+        if (next_x < 0 or next_y < 0) continue;
+        const ux: usize = @intCast(next_x);
+        const uy: usize = @intCast(next_y);
+        if (ux >= s.world.width or uy >= s.world.height) continue;
+        if (!s.world.is_walkable(ux, uy)) continue;
+        if (unit_at(s, ux, uy) != null) continue;
+        return .{ .x = ux, .y = uy };
     }
-    return .{ .x = cx, .y = cy };
+    return .{ .x = center_x, .y = center_y };
 }
 
 test "move_cursor clamps to bounds" {
-    var s = State.init(1, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 1, 80, 45, &cfg);
+    defer s.deinit();
     s.cursor_x = 0;
     s.cursor_y = 0;
     move_cursor(&s, -1, 0);
@@ -394,7 +424,13 @@ test "move_cursor clamps to bounds" {
 }
 
 test "init places both TCs as buildings" {
-    const s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     try std.testing.expectEqual(@as(usize, 2), s.building_count);
     try std.testing.expectEqual(entity.BuildingKind.town_center, s.buildings[0].kind);
     try std.testing.expectEqual(entity.Owner.player, s.buildings[0].owner);
@@ -403,7 +439,13 @@ test "init places both TCs as buildings" {
 }
 
 test "init spawns starting workers" {
-    const s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     var player_workers: usize = 0;
     var enemy_workers: usize = 0;
     for (0..s.unit_count) |i| {
@@ -415,7 +457,13 @@ test "init spawns starting workers" {
 }
 
 test "init spawns deer" {
-    const s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     var deer: usize = 0;
     for (0..s.unit_count) |i| {
         if (s.units[i].owner == .neutral) deer += 1;
@@ -424,14 +472,23 @@ test "init spawns deer" {
 }
 
 test "init buildings start complete" {
-    const s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     for (0..s.building_count) |i| {
         try std.testing.expect(s.buildings[i].is_complete());
     }
 }
 
 test "spawn_worker adds unit and selects it" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     const before = s.unit_count;
     try std.testing.expect(spawn_worker(&s));
     try std.testing.expectEqual(before + 1, s.unit_count);
@@ -440,7 +497,10 @@ test "spawn_worker adds unit and selects it" {
 }
 
 test "tick moves unit along path" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     s.units[0].x = 5;
     s.units[0].y = 5;
     s.units[0].path[0] = .{ .x = 6, .y = 5 };
@@ -459,7 +519,10 @@ test "tick moves unit along path" {
 }
 
 test "select_next cycles through player units" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     const first = s.selected_unit.?;
     select_next(&s);
     const second = s.selected_unit.?;
@@ -467,32 +530,59 @@ test "select_next cycles through player units" {
 }
 
 test "unit_at finds unit at position" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     const ux = s.units[0].x;
     const uy = s.units[0].y;
     try std.testing.expect(unit_at(&s, ux, uy) != null);
 }
 
 test "unit_at returns null for empty position" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     try std.testing.expect(unit_at(&s, 0, 0) == null or !s.world.is_walkable(0, 0));
 }
 
 test "player_tc returns player town center position" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     const tc = player_tc(&s).?;
     try std.testing.expectEqual(@as(usize, s.world.player_tc_x), tc.x);
     try std.testing.expectEqual(@as(usize, s.world.player_tc_y), tc.y);
 }
 
 test "building_at finds buildings at TC positions" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     try std.testing.expect(building_at(&s, s.world.player_tc_x, s.world.player_tc_y) != null);
     try std.testing.expect(building_at(&s, s.world.enemy_tc_x, s.world.enemy_tc_y) != null);
 }
 
 test "building_at returns null for empty position" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     try std.testing.expect(building_at(&s, 0, 0) == null);
 }
 
@@ -531,23 +621,35 @@ test "col_to_letters roundtrip" {
 }
 
 test "player_pop counts player units" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     try std.testing.expectEqual(@as(usize, 2), player_pop(&s));
 }
 
 test "player_pop_cap counts from buildings" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     try std.testing.expectEqual(@as(usize, 5), player_pop_cap(&s));
 }
 
 test "player_pop_cap ignores incomplete buildings" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     s.buildings[0].build_progress = 50;
     try std.testing.expectEqual(@as(usize, 0), player_pop_cap(&s));
 }
 
 test "move_selected sets unit on path" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     s.units[0].x = s.world.player_tc_x + 1;
     s.units[0].y = s.world.player_tc_y;
     s.selected_unit = 0;
@@ -561,13 +663,19 @@ test "move_selected sets unit on path" {
 }
 
 test "move_selected with no selection does nothing" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     s.selected_unit = null;
     move_selected(&s);
 }
 
 test "move_selected ignores enemy unit" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     const enemy_idx = blk: {
         for (0..s.unit_count) |i| {
             if (s.units[i].owner == .enemy) break :blk i;
@@ -582,13 +690,19 @@ test "move_selected ignores enemy unit" {
 }
 
 test "spawn_unit returns false at capacity" {
-    var s = State.init(42, 80, 45);
-    s.unit_count = entity.MAX_UNITS;
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    s.unit_count = s.cfg.entity_limits.max_units;
     try std.testing.expect(!spawn_unit(&s, .worker, .player, s.world.player_tc_x, s.world.player_tc_y));
 }
 
 test "elapsed_seconds" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     try std.testing.expectEqual(@as(usize, 0), elapsed_seconds(&s));
     for (0..10) |_| tick(&s);
     try std.testing.expectEqual(@as(usize, 1), elapsed_seconds(&s));
@@ -597,14 +711,23 @@ test "elapsed_seconds" {
 }
 
 test "select_next skips neutral and enemy units" {
-    const s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     if (s.selected_unit) |bi| {
         try std.testing.expect(s.units[bi].owner == .player);
     }
 }
 
 test "move_cursor normal movement" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     s.cursor_x = 10;
     s.cursor_y = 10;
     move_cursor(&s, 5, -3);
@@ -613,7 +736,10 @@ test "move_cursor normal movement" {
 }
 
 test "select_next with only enemy units sets null" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     for (0..s.unit_count) |i| {
         s.units[i].owner = .enemy;
     }
@@ -623,21 +749,30 @@ test "select_next with only enemy units sets null" {
 }
 
 test "player_tc returns null with no player TC" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     s.buildings[0].owner = .enemy;
     s.buildings[1].owner = .enemy;
     try std.testing.expect(player_tc(&s) == null);
 }
 
 test "spawn_unit with enemy owner does not set selection" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     const before = s.selected_unit.?;
     _ = spawn_unit(&s, .worker, .enemy, s.world.enemy_tc_x, s.world.enemy_tc_y);
     try std.testing.expectEqual(before, s.selected_unit.?);
 }
 
 test "deer wander over many ticks" {
-    var s = State.init(42, 80, 45);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
     var deer_idx: ?usize = null;
     for (0..s.unit_count) |i| {
         if (s.units[i].owner == .neutral) {
@@ -685,9 +820,57 @@ test "col_to_letters produces valid column letters" {
 }
 
 test "map dimensions account for labels and drawer" {
-    const s = State.init(42, 120, 50);
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    const s = try State.init(allocator, 42, 120, 50, &cfg);
+    defer {
+        var mut_s = s;
+        mut_s.deinit();
+    }
     try std.testing.expect(s.world.width > 0);
     try std.testing.expect(s.world.height > 0);
     try std.testing.expect(s.world.width < 120);
     try std.testing.expect(s.world.height < 50);
+}
+
+test "units cannot occupy same tile" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    
+    // Check all units have unique positions
+    for (0..s.unit_count) |i| {
+        for (i + 1..s.unit_count) |j| {
+            const same = s.units[i].x == s.units[j].x and s.units[i].y == s.units[j].y;
+            try std.testing.expect(!same);
+        }
+    }
+}
+
+test "tick blocks movement into occupied tile" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    
+    // Place unit 0 at (10,10), unit 1 at (11,10)
+    s.units[0].x = 10;
+    s.units[0].y = 10;
+    s.units[0].state = .moving;
+    s.units[0].path[0] = .{ .x = 11, .y = 10 };
+    s.units[0].path_len = 1;
+    s.units[0].path_idx = 0;
+    
+    s.units[1].x = 11;
+    s.units[1].y = 10;
+    s.units[1].state = .idle;
+    s.units[1].path_len = 0;
+    
+    tick(&s);
+    
+    // Unit 0 should not have moved
+    try std.testing.expectEqual(@as(usize, 10), s.units[0].x);
+    try std.testing.expectEqual(@as(usize, 10), s.units[0].y);
+    try std.testing.expectEqual(entity.UnitState.moving, s.units[0].state);
 }

@@ -2,38 +2,36 @@ const std = @import("std");
 const game = @import("game.zig");
 const input = @import("input.zig");
 const render = @import("render.zig");
-const term = @import("terminal.zig");
-const ti = @import("time.zig");
-
-const TICK_PERIOD_NS = 100_000_000;
-const RESIZE_POLL_INTERVAL_NS = 10_000_000;
-const FRAME_SLEEP_NS = 1_000_000;
-const MIN_FRAME_WIDTH = 20;
-const MIN_FRAME_HEIGHT = 15;
+const terminal = @import("terminal.zig");
+const time = @import("time.zig");
+const config = @import("config.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const alloc = init.gpa;
 
-    var t: term.Terminal = undefined;
+    const cfg = config.default();
+
+    var t: terminal.Terminal = undefined;
     try t.init(io, alloc, init.environ_map);
     defer t.deinit();
 
     var canvas = t.canvas();
-    while (canvas.width() < MIN_FRAME_WIDTH or canvas.height() < MIN_FRAME_HEIGHT) {
+    while (canvas.width() < cfg.map_dims.min_term_width or canvas.height() < cfg.map_dims.min_term_height) {
         while (try t.poll_event()) |ev| {
             if (ev == .resize) break;
         }
         canvas = t.canvas();
-        ti.sleep_ns(RESIZE_POLL_INTERVAL_NS);
+        time.sleep_ns(cfg.timing.resize_poll_interval_ns);
     }
 
-    const seed = ti.mono_now();
-    var state = game.State.init(seed, canvas.width(), canvas.height());
-    var ticker = ti.Ticker{ .period_ns = TICK_PERIOD_NS };
+    const seed = time.mono_now();
+    var state = try game.State.init(alloc, seed, canvas.width(), canvas.height(), &cfg);
+    defer state.deinit();
+    var ticker = time.Ticker{ .period_ns = cfg.timing.tick_period_ns };
 
     while (!state.quit) {
-        const ticks = ticker.update(ti.mono_now());
+        const ticks = ticker.update(time.mono_now());
         for (0..ticks) |_| game.tick(&state);
 
         while (try t.poll_event()) |ev| {
@@ -46,7 +44,7 @@ pub fn main(init: std.process.Init) !void {
         render.draw(t.canvas(), &state);
         try t.present();
 
-        ti.sleep_ns(FRAME_SLEEP_NS);
+        time.sleep_ns(cfg.timing.frame_sleep_ns);
     }
 }
 
@@ -54,7 +52,8 @@ test {
     _ = game;
     _ = input;
     _ = render;
-    _ = term;
-    _ = ti;
+    _ = terminal;
+    _ = time;
     _ = @import("color.zig");
+    _ = @import("fmt.zig");
 }

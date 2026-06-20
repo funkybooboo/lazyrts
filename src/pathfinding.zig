@@ -4,8 +4,8 @@ const entity = @import("entity.zig");
 
 const Pos = entity.Pos;
 
-fn idx(x: usize, y: usize) usize {
-    return y * map.MAX_MAP_WIDTH + x;
+fn idx(m: *const map.GameMap, x: usize, y: usize) usize {
+    return y * m.width + x;
 }
 
 fn heuristic(a: Pos, b: Pos) u32 {
@@ -14,26 +14,32 @@ fn heuristic(a: Pos, b: Pos) u32 {
     return @intCast(dx + dy);
 }
 
-const MAP_SIZE = map.MAX_MAP_WIDTH * map.MAX_MAP_HEIGHT;
-
-pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) ?usize {
+pub fn find_path(allocator: std.mem.Allocator, m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) ?usize {
     if (start.x == goal.x and start.y == goal.y) return 0;
     if (!m.is_walkable(goal.x, goal.y)) return null;
     if (!m.is_walkable(start.x, start.y)) return null;
 
-    var g_score: [MAP_SIZE]u32 = undefined;
-    var f_score: [MAP_SIZE]u32 = undefined;
-    var came_from: [MAP_SIZE]?Pos = undefined;
-    var open: [MAP_SIZE]Pos = undefined;
+    const map_size = @as(usize, m.width) * @as(usize, m.height);
+
+    const g_score = allocator.alloc(u32, map_size) catch return null;
+    defer allocator.free(g_score);
+    const f_score = allocator.alloc(u32, map_size) catch return null;
+    defer allocator.free(f_score);
+    const came_from = allocator.alloc(?Pos, map_size) catch return null;
+    defer allocator.free(came_from);
+    const open = allocator.alloc(Pos, map_size) catch return null;
+    defer allocator.free(open);
+    const closed = allocator.alloc(bool, map_size) catch return null;
+    defer allocator.free(closed);
+
+    @memset(g_score, std.math.maxInt(u32));
+    @memset(f_score, std.math.maxInt(u32));
+    @memset(came_from, @as(?Pos, null));
+    @memset(closed, false);
+
     var open_len: usize = 0;
-    var closed: [MAP_SIZE]bool = undefined;
 
-    @memset(&g_score, std.math.maxInt(u32));
-    @memset(&f_score, std.math.maxInt(u32));
-    @memset(&came_from, @as(?Pos, null));
-    @memset(&closed, false);
-
-    const si = idx(start.x, start.y);
+    const si = idx(m, start.x, start.y);
     g_score[si] = 0;
     f_score[si] = heuristic(start, goal);
     open[0] = start;
@@ -48,9 +54,9 @@ pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) 
 
     while (open_len > 0) {
         var best_i: usize = 0;
-        var best_f = f_score[idx(open[0].x, open[0].y)];
+        var best_f = f_score[idx(m, open[0].x, open[0].y)];
         for (1..open_len) |i| {
-            const f = f_score[idx(open[i].x, open[i].y)];
+            const f = f_score[idx(m, open[i].x, open[i].y)];
             if (f < best_f) {
                 best_f = f;
                 best_i = i;
@@ -60,14 +66,15 @@ pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) 
         const current = open[best_i];
 
         if (current.x == goal.x and current.y == goal.y) {
-            var reconstruct: [MAP_SIZE]Pos = undefined;
+            const reconstruct = allocator.alloc(Pos, map_size) catch return null;
+            defer allocator.free(reconstruct);
             var recon_len: usize = 0;
             var cur = goal;
             while (true) {
                 reconstruct[recon_len] = cur;
                 recon_len += 1;
                 if (cur.x == start.x and cur.y == start.y) break;
-                cur = came_from[idx(cur.x, cur.y)].?;
+                cur = came_from[idx(m, cur.x, cur.y)].?;
             }
             const path_len = recon_len - 1;
             if (path_len > out_path.len) return null;
@@ -80,28 +87,28 @@ pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) 
         open[best_i] = open[open_len - 1];
         open_len -= 1;
 
-        const ci = idx(current.x, current.y);
+        const ci = idx(m, current.x, current.y);
         closed[ci] = true;
 
         const cg = g_score[ci];
 
         for (dirs) |d| {
-            const nx = @as(isize, @intCast(current.x)) + d.dx;
-            const ny = @as(isize, @intCast(current.y)) + d.dy;
-            if (nx < 0 or ny < 0) continue;
-            const nux: usize = @intCast(nx);
-            const nuy: usize = @intCast(ny);
-            if (nux >= m.width or nuy >= m.height) continue;
-            if (!m.is_walkable(nux, nuy)) continue;
-            const ni = idx(nux, nuy);
+            const next_x = @as(isize, @intCast(current.x)) + d.dx;
+            const next_y = @as(isize, @intCast(current.y)) + d.dy;
+            if (next_x < 0 or next_y < 0) continue;
+            const unit_x: usize = @intCast(next_x);
+            const unit_y: usize = @intCast(next_y);
+            if (unit_x >= m.width or unit_y >= m.height) continue;
+            if (!m.is_walkable(unit_x, unit_y)) continue;
+            const ni = idx(m, unit_x, unit_y);
             if (closed[ni]) continue;
 
             const tentative_g = cg + 1;
             if (tentative_g < g_score[ni]) {
                 came_from[ni] = current;
                 g_score[ni] = tentative_g;
-                f_score[ni] = tentative_g + heuristic(.{ .x = nux, .y = nuy }, goal);
-                open[open_len] = .{ .x = nux, .y = nuy };
+                f_score[ni] = tentative_g + heuristic(.{ .x = unit_x, .y = unit_y }, goal);
+                open[open_len] = .{ .x = unit_x, .y = unit_y };
                 open_len += 1;
             }
         }
@@ -111,8 +118,13 @@ pub fn find_path(m: *const map.GameMap, start: Pos, goal: Pos, out_path: []Pos) 
 }
 
 test "find_path: straight line" {
-    var m: map.GameMap = .{
-        .tiles = undefined,
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    const m: map.GameMap = .{
+        .tiles = tiles,
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -120,19 +132,22 @@ test "find_path: straight line" {
         .enemy_tc_x = 68,
         .enemy_tc_y = 20,
     };
-    for (&m.tiles) |*row| {
-        for (row) |*t| t.* = .grass;
-    }
-    var path: [256]Pos = undefined;
-    const len = find_path(&m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, &path) orelse unreachable;
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const len = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf) orelse unreachable;
     try std.testing.expectEqual(@as(usize, 5), len);
-    try std.testing.expectEqual(@as(usize, 6), path[0].x);
-    try std.testing.expectEqual(@as(usize, 10), path[4].x);
+    try std.testing.expectEqual(@as(usize, 6), path_buf[0].x);
+    try std.testing.expectEqual(@as(usize, 10), path_buf[4].x);
 }
 
 test "find_path: around obstacle" {
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
     var m: map.GameMap = .{
-        .tiles = undefined,
+        .tiles = tiles,
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -140,20 +155,23 @@ test "find_path: around obstacle" {
         .enemy_tc_x = 68,
         .enemy_tc_y = 20,
     };
-    for (&m.tiles) |*row| {
-        for (row) |*t| t.* = .grass;
-    }
     for (5..35) |y| {
-        m.tiles[y][20] = .tree;
+        m.tiles[y * 80 + 20] = .tree;
     }
-    var path: [256]Pos = undefined;
-    const len = find_path(&m, .{ .x = 10, .y = 20 }, .{ .x = 30, .y = 20 }, &path) orelse unreachable;
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const len = find_path(allocator, &m, .{ .x = 10, .y = 20 }, .{ .x = 30, .y = 20 }, path_buf) orelse unreachable;
     try std.testing.expect(len > 20);
 }
 
 test "find_path: unreachable" {
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
     var m: map.GameMap = .{
-        .tiles = undefined,
+        .tiles = tiles,
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -161,24 +179,27 @@ test "find_path: unreachable" {
         .enemy_tc_x = 68,
         .enemy_tc_y = 20,
     };
-    for (&m.tiles) |*row| {
-        for (row) |*t| t.* = .grass;
-    }
     for (8..13) |y| {
         for (8..13) |x| {
             if (x == 8 or x == 12 or y == 8 or y == 12) {
-                m.tiles[y][x] = .water;
+                m.tiles[y * 80 + x] = .water;
             }
         }
     }
-    var path: [256]Pos = undefined;
-    const result = find_path(&m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 10 }, &path);
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 10 }, path_buf);
     try std.testing.expect(result == null);
 }
 
 test "find_path: start equals goal" {
-    var m: map.GameMap = .{
-        .tiles = undefined,
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
+    const m: map.GameMap = .{
+        .tiles = tiles,
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -186,17 +207,20 @@ test "find_path: start equals goal" {
         .enemy_tc_x = 68,
         .enemy_tc_y = 20,
     };
-    for (&m.tiles) |*row| {
-        for (row) |*t| t.* = .grass;
-    }
-    var path: [256]Pos = undefined;
-    const len = find_path(&m, .{ .x = 5, .y = 5 }, .{ .x = 5, .y = 5 }, &path) orelse unreachable;
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const len = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 5, .y = 5 }, path_buf) orelse unreachable;
     try std.testing.expectEqual(@as(usize, 0), len);
 }
 
 test "find_path: goal is unwalkable" {
+    const allocator = std.testing.allocator;
+    const map_size: usize = 80 * 40;
+    const tiles = try allocator.alloc(map.Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
     var m: map.GameMap = .{
-        .tiles = undefined,
+        .tiles = tiles,
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -204,11 +228,9 @@ test "find_path: goal is unwalkable" {
         .enemy_tc_x = 68,
         .enemy_tc_y = 20,
     };
-    for (&m.tiles) |*row| {
-        for (row) |*t| t.* = .grass;
-    }
-    m.tiles[5][10] = .water;
-    var path: [256]Pos = undefined;
-    const result = find_path(&m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, &path);
+    m.tiles[5 * 80 + 10] = .water;
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const result = find_path(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf);
     try std.testing.expect(result == null);
 }

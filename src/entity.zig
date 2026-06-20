@@ -1,4 +1,5 @@
 const std = @import("std");
+const config = @import("config.zig");
 
 pub const Pos = struct { x: usize, y: usize };
 
@@ -9,19 +10,11 @@ pub const UnitKind = enum {
     soldier,
     deer,
 
-    pub fn glyph(self: UnitKind) []const u8 {
+    pub fn glyph(self: UnitKind, cfg: *const config.Config) []const u8 {
         return switch (self) {
-            .worker => "w",
-            .soldier => "s",
-            .deer => "d",
-        };
-    }
-
-    pub fn max_hp(self: UnitKind) u16 {
-        return switch (self) {
-            .worker => 50,
-            .soldier => 100,
-            .deer => 25,
+            .worker => cfg.glyphs.worker,
+            .soldier => cfg.glyphs.soldier,
+            .deer => cfg.glyphs.deer,
         };
     }
 };
@@ -32,39 +25,45 @@ pub const BuildingKind = enum {
     barracks,
     farm,
 
-    pub fn glyph(self: BuildingKind) []const u8 {
+    pub fn glyph(self: BuildingKind, cfg: *const config.Config) []const u8 {
         return switch (self) {
-            .town_center => "C",
-            .house => "H",
-            .barracks => "B",
-            .farm => "F",
+            .town_center => cfg.glyphs.town_center,
+            .house => cfg.glyphs.house,
+            .barracks => cfg.glyphs.barracks,
+            .farm => cfg.glyphs.farm,
         };
     }
 
-    pub fn max_hp(self: BuildingKind) u16 {
+    pub fn label(self: BuildingKind, cfg: *const config.Config) []const u8 {
         return switch (self) {
-            .town_center => 500,
-            .house => 200,
-            .barracks => 300,
-            .farm => 100,
-        };
-    }
-
-    pub fn label(self: BuildingKind) []const u8 {
-        return switch (self) {
-            .town_center => "TC",
-            .house => "House",
-            .barracks => "Barracks",
-            .farm => "Farm",
+            .town_center => cfg.labels.town_center,
+            .house => cfg.labels.house,
+            .barracks => cfg.labels.barracks,
+            .farm => cfg.labels.farm,
         };
     }
 };
 
 pub const UnitState = enum { idle, moving };
 
-pub const MAX_PATH: usize = 256;
-pub const MAX_UNITS: usize = 128;
-pub const MAX_BUILDINGS: usize = 32;
+pub const BUILD_COMPLETE_PERCENT: u8 = 100;
+
+pub fn unit_max_hp(kind: UnitKind, cfg: *const config.Config) u16 {
+    return switch (kind) {
+        .worker => cfg.unit_hp.worker,
+        .soldier => cfg.unit_hp.soldier,
+        .deer => cfg.unit_hp.deer,
+    };
+}
+
+pub fn building_max_hp(kind: BuildingKind, cfg: *const config.Config) u16 {
+    return switch (kind) {
+        .town_center => cfg.building_hp.town_center,
+        .house => cfg.building_hp.house,
+        .barracks => cfg.building_hp.barracks,
+        .farm => cfg.building_hp.farm,
+    };
+}
 
 pub const Unit = struct {
     x: usize,
@@ -73,7 +72,7 @@ pub const Unit = struct {
     owner: Owner,
     hp: u16,
     state: UnitState = .idle,
-    path: [MAX_PATH]Pos = undefined,
+    path: []Pos = &[_]Pos{},
     path_len: usize = 0,
     path_idx: usize = 0,
 
@@ -104,7 +103,7 @@ pub const Building = struct {
     build_progress: u8 = 100,
 
     pub fn is_complete(self: *const Building) bool {
-        return self.build_progress >= 100;
+        return self.build_progress >= BUILD_COMPLETE_PERCENT;
     }
 };
 
@@ -116,11 +115,12 @@ test "Unit.pos returns coordinates" {
 }
 
 test "Unit.step moves along path" {
-    var u = Unit{ .x = 5, .y = 5, .kind = .worker, .owner = .player, .hp = 50, .state = .moving };
-    u.path[0] = .{ .x = 6, .y = 5 };
-    u.path[1] = .{ .x = 7, .y = 5 };
-    u.path_len = 2;
-    u.path_idx = 0;
+    const allocator = std.testing.allocator;
+    var path_buf = try allocator.alloc(Pos, 2);
+    defer allocator.free(path_buf);
+    path_buf[0] = .{ .x = 6, .y = 5 };
+    path_buf[1] = .{ .x = 7, .y = 5 };
+    var u = Unit{ .x = 5, .y = 5, .kind = .worker, .owner = .player, .hp = 50, .state = .moving, .path = path_buf, .path_len = 2, .path_idx = 0 };
     u.step();
     try std.testing.expectEqual(@as(usize, 6), u.x);
     try std.testing.expectEqual(UnitState.moving, u.state);
@@ -137,35 +137,40 @@ test "Unit.step on idle does nothing" {
 }
 
 test "UnitKind.glyph all lowercase" {
-    try std.testing.expectEqualStrings("w", UnitKind.worker.glyph());
-    try std.testing.expectEqualStrings("s", UnitKind.soldier.glyph());
-    try std.testing.expectEqualStrings("d", UnitKind.deer.glyph());
+    const cfg = config.default();
+    try std.testing.expectEqualStrings("w", UnitKind.worker.glyph(&cfg));
+    try std.testing.expectEqualStrings("s", UnitKind.soldier.glyph(&cfg));
+    try std.testing.expectEqualStrings("d", UnitKind.deer.glyph(&cfg));
 }
 
-test "UnitKind.max_hp positive" {
-    try std.testing.expect(UnitKind.worker.max_hp() > 0);
-    try std.testing.expect(UnitKind.soldier.max_hp() > 0);
-    try std.testing.expect(UnitKind.deer.max_hp() > 0);
-    try std.testing.expect(UnitKind.soldier.max_hp() > UnitKind.worker.max_hp());
+test "unit_max_hp positive" {
+    const cfg = config.default();
+    try std.testing.expect(unit_max_hp(.worker, &cfg) > 0);
+    try std.testing.expect(unit_max_hp(.soldier, &cfg) > 0);
+    try std.testing.expect(unit_max_hp(.deer, &cfg) > 0);
+    try std.testing.expect(unit_max_hp(.soldier, &cfg) > unit_max_hp(.worker, &cfg));
 }
 
 test "BuildingKind.glyph all uppercase" {
-    try std.testing.expectEqualStrings("C", BuildingKind.town_center.glyph());
-    try std.testing.expectEqualStrings("H", BuildingKind.house.glyph());
-    try std.testing.expectEqualStrings("B", BuildingKind.barracks.glyph());
-    try std.testing.expectEqualStrings("F", BuildingKind.farm.glyph());
+    const cfg = config.default();
+    try std.testing.expectEqualStrings("C", BuildingKind.town_center.glyph(&cfg));
+    try std.testing.expectEqualStrings("H", BuildingKind.house.glyph(&cfg));
+    try std.testing.expectEqualStrings("B", BuildingKind.barracks.glyph(&cfg));
+    try std.testing.expectEqualStrings("F", BuildingKind.farm.glyph(&cfg));
 }
 
-test "BuildingKind.max_hp positive" {
-    try std.testing.expect(BuildingKind.town_center.max_hp() > 0);
-    try std.testing.expect(BuildingKind.town_center.max_hp() > BuildingKind.house.max_hp());
+test "building_max_hp positive" {
+    const cfg = config.default();
+    try std.testing.expect(building_max_hp(.town_center, &cfg) > 0);
+    try std.testing.expect(building_max_hp(.town_center, &cfg) > building_max_hp(.house, &cfg));
 }
 
 test "BuildingKind.label non-empty" {
-    try std.testing.expect(BuildingKind.town_center.label().len > 0);
-    try std.testing.expect(BuildingKind.house.label().len > 0);
-    try std.testing.expect(BuildingKind.barracks.label().len > 0);
-    try std.testing.expect(BuildingKind.farm.label().len > 0);
+    const cfg = config.default();
+    try std.testing.expect(BuildingKind.town_center.label(&cfg).len > 0);
+    try std.testing.expect(BuildingKind.house.label(&cfg).len > 0);
+    try std.testing.expect(BuildingKind.barracks.label(&cfg).len > 0);
+    try std.testing.expect(BuildingKind.farm.label(&cfg).len > 0);
 }
 
 test "Building.is_complete" {
@@ -176,18 +181,20 @@ test "Building.is_complete" {
 }
 
 test "UnitKind.glyph is lowercase" {
+    const cfg = config.default();
     const kinds = [_]UnitKind{ .worker, .soldier, .deer };
     for (kinds) |k| {
-        const g = k.glyph();
+        const g = k.glyph(&cfg);
         try std.testing.expect(g.len == 1);
         try std.testing.expect(g[0] >= 'a' and g[0] <= 'z');
     }
 }
 
 test "BuildingKind.glyph is uppercase" {
+    const cfg = config.default();
     const kinds = [_]BuildingKind{ .town_center, .house, .barracks, .farm };
     for (kinds) |k| {
-        const g = k.glyph();
+        const g = k.glyph(&cfg);
         try std.testing.expect(g.len == 1);
         try std.testing.expect(g[0] >= 'A' and g[0] <= 'Z');
     }
@@ -203,10 +210,11 @@ test "Unit default state is idle" {
 }
 
 test "Unit.step path end resets state" {
-    var u = Unit{ .x = 5, .y = 5, .kind = .worker, .owner = .player, .hp = 50, .state = .moving };
-    u.path[0] = .{ .x = 6, .y = 5 };
-    u.path_len = 1;
-    u.path_idx = 0;
+    const allocator = std.testing.allocator;
+    var path_buf = try allocator.alloc(Pos, 1);
+    defer allocator.free(path_buf);
+    path_buf[0] = .{ .x = 6, .y = 5 };
+    var u = Unit{ .x = 5, .y = 5, .kind = .worker, .owner = .player, .hp = 50, .state = .moving, .path = path_buf, .path_len = 1, .path_idx = 0 };
     u.step();
     try std.testing.expectEqual(UnitState.idle, u.state);
     try std.testing.expectEqual(@as(usize, 0), u.path_len);

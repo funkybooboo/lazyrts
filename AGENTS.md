@@ -35,9 +35,19 @@ Entry point. Owns the terminal event loop. Dispatches:
 - `key_press` -> `input.handle()`
 - `resize` -> ignored (terminal handles internally)
 
-Uses `time.Ticker` for 10 Hz tick. Calls `render.draw()`. Does not
+Uses `time.Ticker` for tick rate from `config.zig`. Calls `render.draw()`. Does not
 contain game logic. `test` block references all modules so
 `zig build test` discovers their tests.
+
+### config.zig
+
+Single source of truth for all constants and configuration values.
+
+- All numeric constants, colors, sizes, limits live here
+- Organized by domain: `tick_rate`, `map_dims`, `entity_limits`, `unit_hp`, `building_hp`, `deer`, `map_gen`, `ui`, `timing`, `colors`
+- Other modules import and re-export as aliases for backward compatibility
+- Testable: can override values for testing by importing config directly
+- No runtime overhead: all values are compile-time constants
 
 ### game.zig
 

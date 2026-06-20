@@ -1,43 +1,23 @@
 const std = @import("std");
 const entity = @import("entity.zig");
+const config = @import("config.zig");
 
-pub const MAX_MAP_WIDTH: usize = 200;
-pub const MAX_MAP_HEIGHT: usize = 100;
-pub const TC_CLEAR_RADIUS: usize = 5;
-pub const PLAYER_TC_X_PCT: usize = 15;
-pub const ENEMY_TC_X_PCT: usize = 85;
-pub const SECTOR_SIZE: usize = 20;
-pub const BIOME_ROLL_MAX: usize = 99;
-pub const TREE_CLUSTER_PROB: usize = 40;
-pub const WATER_CLUSTER_THRESH: usize = 48;
-pub const TREE_CLUSTER_MIN: usize = 20;
-pub const TREE_CLUSTER_AREA_DIV: usize = 60;
-pub const WATER_CLUSTER_MIN: usize = 18;
-pub const WATER_CLUSTER_AREA_DIV: usize = 70;
-pub const TREE_TC_BUFFER: usize = 2;
-pub const WATER_TC_BUFFER: usize = 4;
-pub const CLUSTER_TC_BUFFER: usize = 1;
-pub const CLUSTER_FRONTIER_CAP: usize = 600;
-pub const DEER_AREA_DIVISOR: usize = 600;
-pub const MIN_DEER: usize = 4;
-pub const CORRIDOR_WIDTH: usize = 2;
+pub const Tile = enum {
+    grass,
+    tree,
+    water,
+    town_center,
+    house,
+    barracks,
 
-pub const Tile = enum(u8) {
-    grass = ' ',
-    tree = 'T',
-    water = '~',
-    town_center = 'C',
-    house = 'H',
-    barracks = 'B',
-
-    pub fn glyph(self: Tile) []const u8 {
+    pub fn glyph(self: Tile, cfg: *const config.Config) []const u8 {
         return switch (self) {
-            .grass => " ",
-            .tree => "T",
-            .water => "~",
-            .town_center => "C",
-            .house => "H",
-            .barracks => "B",
+            .grass => cfg.glyphs.grass,
+            .tree => cfg.glyphs.tree,
+            .water => cfg.glyphs.water,
+            .town_center => cfg.glyphs.town_center,
+            .house => cfg.glyphs.house,
+            .barracks => cfg.glyphs.barracks,
         };
     }
 
@@ -48,20 +28,20 @@ pub const Tile = enum(u8) {
         };
     }
 
-    pub fn label(self: Tile) []const u8 {
+    pub fn label(self: Tile, cfg: *const config.Config) []const u8 {
         return switch (self) {
-            .grass => "Grass",
-            .tree => "Forest",
-            .water => "Water",
-            .town_center => "TC",
-            .house => "House",
-            .barracks => "Barracks",
+            .grass => cfg.labels.grass,
+            .tree => cfg.labels.tree,
+            .water => cfg.labels.water,
+            .town_center => cfg.labels.town_center,
+            .house => cfg.labels.house,
+            .barracks => cfg.labels.barracks,
         };
     }
 };
 
 pub const GameMap = struct {
-    tiles: [MAX_MAP_HEIGHT][MAX_MAP_WIDTH]Tile,
+    tiles: []Tile,
     width: u16,
     height: u16,
     player_tc_x: u16,
@@ -69,81 +49,87 @@ pub const GameMap = struct {
     enemy_tc_x: u16,
     enemy_tc_y: u16,
 
-    pub fn init(seed: u64, w: u16, h: u16) GameMap {
-        const mw: usize = @min(@as(usize, w), MAX_MAP_WIDTH);
-        const mh: usize = @min(@as(usize, h), MAX_MAP_HEIGHT);
+    pub fn init(allocator: std.mem.Allocator, seed: u64, w: u16, h: u16, cfg: *const config.Config) !GameMap {
+        const map_width: usize = @as(usize, w);
+        const map_height: usize = @as(usize, h);
 
-        const ptx: usize = mw * PLAYER_TC_X_PCT / 100;
-        const pty: usize = mh / 2;
-        const etx: usize = @max(mw * ENEMY_TC_X_PCT / 100, @as(usize, 1));
-        const ety: usize = mh / 2;
+        const tiles = try allocator.alloc(Tile, map_width * map_height);
+        errdefer allocator.free(tiles);
+
+        const player_tc_x_pos: usize = map_width * cfg.map_gen.player_tc_x_pct / 100;
+        const player_tc_y_pos: usize = map_height / 2;
+        const enemy_tc_x_pos: usize = @max(map_width * cfg.map_gen.enemy_tc_x_pct / 100, @as(usize, 1));
+        const enemy_tc_y_pos: usize = map_height / 2;
 
         var m: GameMap = .{
-            .tiles = undefined,
-            .width = @intCast(mw),
-            .height = @intCast(mh),
-            .player_tc_x = @intCast(ptx),
-            .player_tc_y = @intCast(pty),
-            .enemy_tc_x = @intCast(etx),
-            .enemy_tc_y = @intCast(ety),
+            .tiles = tiles,
+            .width = @intCast(map_width),
+            .height = @intCast(map_height),
+            .player_tc_x = @intCast(player_tc_x_pos),
+            .player_tc_y = @intCast(player_tc_y_pos),
+            .enemy_tc_x = @intCast(enemy_tc_x_pos),
+            .enemy_tc_y = @intCast(enemy_tc_y_pos),
         };
 
-        if (m.player_tc_x == m.enemy_tc_x and mw > 2) {
-            m.enemy_tc_x = @intCast(mw - 1 - ptx);
+        if (m.player_tc_x == m.enemy_tc_x and map_width > 2) {
+            m.enemy_tc_x = @intCast(map_width - 1 - player_tc_x_pos);
         }
 
         var rng_obj = std.Random.DefaultPrng.init(seed);
         const rng = rng_obj.random();
 
-        for (&m.tiles) |*row| {
-            for (row) |*t| t.* = .grass;
-        }
+        for (tiles) |*t| t.* = .grass;
 
-        m.clear(m.player_tc_x, m.player_tc_y, TC_CLEAR_RADIUS);
-        m.clear(m.enemy_tc_x, m.enemy_tc_y, TC_CLEAR_RADIUS);
+        m.clear(m.player_tc_x, m.player_tc_y, cfg.map_gen.tc_clear_radius);
+        m.clear(m.enemy_tc_x, m.enemy_tc_y, cfg.map_gen.tc_clear_radius);
 
-        const area = @as(usize, mw) * @as(usize, mh);
+        const area = map_width * map_height;
 
-        const sectors_x = mw / SECTOR_SIZE + 1;
-        const sectors_y = mh / SECTOR_SIZE + 1;
+        const sectors_x = map_width / cfg.map_gen.sector_size + 1;
+        const sectors_y = map_height / cfg.map_gen.sector_size + 1;
 
-        for (0..sectors_y) |sy| {
-            for (0..sectors_x) |sx| {
-                const base_x = sx * SECTOR_SIZE + SECTOR_SIZE / 2;
-                const base_y = sy * SECTOR_SIZE + SECTOR_SIZE / 2;
-                const ox = rng.intRangeAtMost(usize, 0, SECTOR_SIZE / 2);
-                const oy = rng.intRangeAtMost(usize, 0, SECTOR_SIZE / 2);
-                const seed_x = @min(base_x + ox, mw - 1);
-                const seed_y = @min(base_y + oy, mh - 1);
+        for (0..sectors_y) |sector_y| {
+            for (0..sectors_x) |sector_x| {
+                const base_x = sector_x * cfg.map_gen.sector_size + cfg.map_gen.sector_size / 2;
+                const base_y = sector_y * cfg.map_gen.sector_size + cfg.map_gen.sector_size / 2;
+                const offset_x = rng.intRangeAtMost(usize, 0, cfg.map_gen.sector_size / 2);
+                const offset_y = rng.intRangeAtMost(usize, 0, cfg.map_gen.sector_size / 2);
+                const seed_x = @min(base_x + offset_x, map_width - 1);
+                const seed_y = @min(base_y + offset_y, map_height - 1);
 
-                const roll = rng.intRangeAtMost(usize, 0, BIOME_ROLL_MAX);
-                if (roll < TREE_CLUSTER_PROB) {
-                    const cluster_size = rng.intRangeAtMost(usize, TREE_CLUSTER_MIN, @max(TREE_CLUSTER_MIN + 1, area / TREE_CLUSTER_AREA_DIV));
-                    if (!m.near_tc(seed_x, seed_y, TC_CLEAR_RADIUS + TREE_TC_BUFFER)) {
-                        m.grow_cluster(seed_x, seed_y, .tree, cluster_size, rng);
+                const roll = rng.intRangeAtMost(usize, 0, cfg.map_gen.biome_roll_max);
+                if (roll < cfg.map_gen.tree_cluster_prob) {
+                    const cluster_size = rng.intRangeAtMost(usize, cfg.map_gen.tree_cluster_min, @max(cfg.map_gen.tree_cluster_min + 1, area / cfg.map_gen.tree_cluster_area_div));
+                    if (!m.near_tc(seed_x, seed_y, cfg.map_gen.tc_clear_radius + cfg.map_gen.tree_tc_buffer)) {
+                        try m.grow_cluster(allocator, seed_x, seed_y, .tree, cluster_size, rng, cfg);
                     }
-                } else if (roll < WATER_CLUSTER_THRESH) {
-                    const cluster_size = rng.intRangeAtMost(usize, WATER_CLUSTER_MIN, @max(WATER_CLUSTER_MIN + 1, area / WATER_CLUSTER_AREA_DIV));
-                    if (!m.near_tc(seed_x, seed_y, TC_CLEAR_RADIUS + WATER_TC_BUFFER)) {
-                        m.grow_cluster(seed_x, seed_y, .water, cluster_size, rng);
+                } else if (roll < cfg.map_gen.water_cluster_thresh) {
+                    const cluster_size = rng.intRangeAtMost(usize, cfg.map_gen.water_cluster_min, @max(cfg.map_gen.water_cluster_min + 1, area / cfg.map_gen.water_cluster_area_div));
+                    if (!m.near_tc(seed_x, seed_y, cfg.map_gen.tc_clear_radius + cfg.map_gen.water_tc_buffer)) {
+                        try m.grow_cluster(allocator, seed_x, seed_y, .water, cluster_size, rng, cfg);
                     }
                 }
             }
         }
 
-        m.tiles[m.player_tc_y][m.player_tc_x] = .town_center;
-        m.tiles[m.enemy_tc_y][m.enemy_tc_x] = .town_center;
+        m.set(m.player_tc_x, m.player_tc_y, .town_center);
+        m.set(m.enemy_tc_x, m.enemy_tc_y, .town_center);
 
-        if (!m.has_path(m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y)) {
-            m.carve_corridor(m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y);
+        if (!m.has_path(allocator, m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y)) {
+            m.carve_corridor(m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y, cfg);
         }
 
         return m;
     }
 
+    pub fn deinit(self: *GameMap, allocator: std.mem.Allocator) void {
+        allocator.free(self.tiles);
+        self.tiles = &[_]Tile{};
+    }
+
     pub fn at(self: *const GameMap, x: usize, y: usize) Tile {
         if (x >= self.width or y >= self.height) return .water;
-        return self.tiles[y][x];
+        return self.tiles[y * self.width + x];
     }
 
     pub fn is_walkable(self: *const GameMap, x: usize, y: usize) bool {
@@ -152,17 +138,17 @@ pub const GameMap = struct {
 
     pub fn set(self: *GameMap, x: usize, y: usize, tile: Tile) void {
         if (x >= self.width or y >= self.height) return;
-        self.tiles[y][x] = tile;
+        self.tiles[y * self.width + x] = tile;
     }
 
-    fn clear(self: *GameMap, cx: usize, cy: usize, radius: usize) void {
-        const y0 = if (cy > radius) cy - radius else 0;
-        const y1 = @min(cy + radius + 1, self.height);
-        const x0 = if (cx > radius) cx - radius else 0;
-        const x1 = @min(cx + radius + 1, self.width);
+    fn clear(self: *GameMap, center_x: usize, center_y: usize, radius: usize) void {
+        const y0 = if (center_y > radius) center_y - radius else 0;
+        const y1 = @min(center_y + radius + 1, @as(usize, self.height));
+        const x0 = if (center_x > radius) center_x - radius else 0;
+        const x1 = @min(center_x + radius + 1, @as(usize, self.width));
         for (y0..y1) |y| {
             for (x0..x1) |x| {
-                self.tiles[y][x] = .grass;
+                self.tiles[y * self.width + x] = .grass;
             }
         }
     }
@@ -177,11 +163,14 @@ pub const GameMap = struct {
         return false;
     }
 
-    fn grow_cluster(self: *GameMap, sx: usize, sy: usize, tile: Tile, count: usize, rng: std.Random) void {
-        var frontier: [CLUSTER_FRONTIER_CAP]entity.Pos = undefined;
+    fn grow_cluster(self: *GameMap, allocator: std.mem.Allocator, start_x: usize, start_y: usize, tile: Tile, count: usize, rng: std.Random, cfg: *const config.Config) !void {
+        const frontier_cap = cfg.map_gen.cluster_frontier_cap;
+        const frontier = try allocator.alloc(entity.Pos, frontier_cap);
+        defer allocator.free(frontier);
+        
         var fhead: usize = 1;
         var ftail: usize = 0;
-        frontier[0] = .{ .x = sx, .y = sy };
+        frontier[0] = .{ .x = start_x, .y = start_y };
         var placed: usize = 0;
         while (placed < count and ftail < fhead) {
             const idx = rng.intRangeAtMost(usize, ftail, fhead - 1);
@@ -190,22 +179,22 @@ pub const GameMap = struct {
             frontier[ftail] = cand;
             ftail += 1;
             if (cand.x < self.width and cand.y < self.height) {
-                if (self.tiles[cand.y][cand.x] == .grass and !self.near_tc(cand.x, cand.y, TC_CLEAR_RADIUS + CLUSTER_TC_BUFFER)) {
-                    self.tiles[cand.y][cand.x] = tile;
+                if (self.tiles[cand.y * self.width + cand.x] == .grass and !self.near_tc(cand.x, cand.y, cfg.map_gen.tc_clear_radius + cfg.map_gen.cluster_tc_buffer)) {
+                    self.tiles[cand.y * self.width + cand.x] = tile;
                     placed += 1;
                     const offsets = [_]struct { dx: isize, dy: isize }{
                         .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
                         .{ .dx = -1, .dy = 0 }, .{ .dx = 1, .dy = 0 },
                     };
                     for (offsets) |off| {
-                        const nx = @as(isize, @intCast(cand.x)) + off.dx;
-                        const ny = @as(isize, @intCast(cand.y)) + off.dy;
-                        if (nx >= 0 and ny >= 0) {
-                            const unx: usize = @intCast(nx);
-                            const uny: usize = @intCast(ny);
-                            if (unx < self.width and uny < self.height and fhead < frontier.len) {
-                                if (self.tiles[uny][unx] == .grass) {
-                                    frontier[fhead] = .{ .x = unx, .y = uny };
+                        const next_x = @as(isize, @intCast(cand.x)) + off.dx;
+                        const next_y = @as(isize, @intCast(cand.y)) + off.dy;
+                        if (next_x >= 0 and next_y >= 0) {
+                            const tile_x: usize = @intCast(next_x);
+                            const tile_y: usize = @intCast(next_y);
+                            if (tile_x < self.width and tile_y < self.height and fhead < frontier.len) {
+                                if (self.tiles[tile_y * self.width + tile_x] == .grass) {
+                                    frontier[fhead] = .{ .x = tile_x, .y = tile_y };
                                     fhead += 1;
                                 }
                             }
@@ -216,15 +205,21 @@ pub const GameMap = struct {
         }
     }
 
-    fn has_path(self: *const GameMap, x0: usize, y0: usize, x1: usize, y1: usize) bool {
-        var visited: [MAX_MAP_HEIGHT][MAX_MAP_WIDTH]bool = @splat(@splat(false));
-        var queue: [MAX_MAP_WIDTH * MAX_MAP_HEIGHT]entity.Pos = undefined;
+    fn has_path(self: *const GameMap, allocator: std.mem.Allocator, x0: usize, y0: usize, x1: usize, y1: usize) bool {
+        const map_size = @as(usize, self.width) * @as(usize, self.height);
+        const visited = allocator.alloc(bool, map_size) catch return false;
+        defer allocator.free(visited);
+        const queue = allocator.alloc(entity.Pos, map_size) catch return false;
+        defer allocator.free(queue);
+        
+        for (visited) |*v| v.* = false;
+
         var head: usize = 0;
         var tail: usize = 0;
 
         queue[tail] = .{ .x = x0, .y = y0 };
         tail += 1;
-        visited[y0][x0] = true;
+        visited[y0 * self.width + x0] = true;
 
         const dirs = [_]struct { dx: isize, dy: isize }{
             .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
@@ -236,89 +231,111 @@ pub const GameMap = struct {
             head += 1;
             if (cur.x == x1 and cur.y == y1) return true;
             for (dirs) |d| {
-                const nx = @as(isize, @intCast(cur.x)) + d.dx;
-                const ny = @as(isize, @intCast(cur.y)) + d.dy;
-                if (nx < 0 or ny < 0) continue;
-                const ux: usize = @intCast(nx);
-                const uy: usize = @intCast(ny);
-                if (ux >= self.width or uy >= self.height) continue;
-                if (visited[uy][ux]) continue;
-                if (!self.tiles[uy][ux].is_walkable()) continue;
-                visited[uy][ux] = true;
-                queue[tail] = .{ .x = ux, .y = uy };
+                const next_x = @as(isize, @intCast(cur.x)) + d.dx;
+                const next_y = @as(isize, @intCast(cur.y)) + d.dy;
+                if (next_x < 0 or next_y < 0) continue;
+                const tile_x: usize = @intCast(next_x);
+                const tile_y: usize = @intCast(next_y);
+                if (tile_x >= self.width or tile_y >= self.height) continue;
+                if (visited[tile_y * self.width + tile_x]) continue;
+                if (!self.tiles[tile_y * self.width + tile_x].is_walkable()) continue;
+                visited[tile_y * self.width + tile_x] = true;
+                queue[tail] = .{ .x = tile_x, .y = tile_y };
                 tail += 1;
             }
         }
         return false;
     }
 
-    fn carve_corridor(self: *GameMap, x0: usize, y0: usize, x1: usize, y1: usize) void {
-        var cx: isize = @intCast(x0);
-        var cy: isize = @intCast(y0);
-        const ex: isize = @intCast(x1);
-        const ey: isize = @intCast(y1);
+    fn carve_corridor(self: *GameMap, x0: usize, y0: usize, x1: usize, y1: usize, cfg: *const config.Config) void {
+        var cur_x: isize = @intCast(x0);
+        var cur_y: isize = @intCast(y0);
+        const end_x: isize = @intCast(x1);
+        const end_y: isize = @intCast(y1);
 
-        while (cx != ex) : (cx += if (ex > cx) 1 else -1) {
-            self.carve_wide(@intCast(cx), @intCast(cy), CORRIDOR_WIDTH);
+        while (cur_x != end_x) : (cur_x += if (end_x > cur_x) 1 else -1) {
+            self.carve_wide(@intCast(cur_x), @intCast(cur_y), cfg.map_gen.corridor_width);
         }
-        while (cy != ey) : (cy += if (ey > cy) 1 else -1) {
-            self.carve_wide(@intCast(cx), @intCast(cy), CORRIDOR_WIDTH);
+        while (cur_y != end_y) : (cur_y += if (end_y > cur_y) 1 else -1) {
+            self.carve_wide(@intCast(cur_x), @intCast(cur_y), cfg.map_gen.corridor_width);
         }
-        self.carve_wide(@intCast(ex), @intCast(ey), CORRIDOR_WIDTH);
+        self.carve_wide(@intCast(end_x), @intCast(end_y), cfg.map_gen.corridor_width);
     }
 
-    fn carve_wide(self: *GameMap, cx: usize, cy: usize, width: usize) void {
+    fn carve_wide(self: *GameMap, center_x: usize, center_y: usize, width: usize) void {
         for (0..width) |dy| {
             for (0..width) |dx| {
-                const x = cx + dx;
-                const y = cy + dy;
+                const x = center_x + dx;
+                const y = center_y + dy;
                 if (x < self.width and y < self.height) {
-                    if (self.tiles[y][x] != .town_center) {
-                        self.tiles[y][x] = .grass;
+                    if (self.tiles[y * self.width + x] != .town_center) {
+                        self.tiles[y * self.width + x] = .grass;
                     }
                 }
             }
         }
     }
 
-    pub fn deer_count(self: *const GameMap) usize {
+    pub fn deer_count(self: *const GameMap, cfg: *const config.Config) usize {
         const area = @as(usize, self.width) * @as(usize, self.height);
-        return @max(MIN_DEER, area / DEER_AREA_DIVISOR);
+        return @max(cfg.deer.min_count, area / cfg.deer.area_divisor);
     }
 };
 
 test "at returns water for out of bounds" {
-    var m = GameMap.init(1, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 1, 80, 40, &cfg);
+    defer m.deinit(allocator);
     try std.testing.expectEqual(.water, m.at(80, 0));
     try std.testing.expectEqual(.water, m.at(0, 40));
 }
 
 test "at returns tile within bounds" {
-    var m = GameMap.init(1, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 1, 80, 40, &cfg);
+    defer m.deinit(allocator);
     try std.testing.expectEqual(.town_center, m.at(m.player_tc_x, m.player_tc_y));
 }
 
 test "init places both TCs" {
-    const m = GameMap.init(99, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    const m = try GameMap.init(allocator, 99, 80, 40, &cfg);
+    defer {
+        var mut_m = m;
+        mut_m.deinit(allocator);
+    }
     try std.testing.expectEqual(.town_center, m.at(m.player_tc_x, m.player_tc_y));
     try std.testing.expectEqual(.town_center, m.at(m.enemy_tc_x, m.enemy_tc_y));
 }
 
 test "init clears areas around TCs" {
-    var m = GameMap.init(99, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 99, 80, 40, &cfg);
+    defer m.deinit(allocator);
     try std.testing.expectEqual(.grass, m.at(m.player_tc_x + 1, m.player_tc_y + 1));
 }
 
 test "player TC on left, enemy on right" {
-    const m = GameMap.init(99, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    const m = try GameMap.init(allocator, 99, 80, 40, &cfg);
+    defer {
+        var mut_m = m;
+        mut_m.deinit(allocator);
+    }
     try std.testing.expect(m.player_tc_x < m.enemy_tc_x);
 }
 
 test "glyph returns single char" {
-    try std.testing.expectEqualStrings("T", Tile.tree.glyph());
-    try std.testing.expectEqualStrings(" ", Tile.grass.glyph());
-    try std.testing.expectEqualStrings("~", Tile.water.glyph());
-    try std.testing.expectEqualStrings("C", Tile.town_center.glyph());
+    const cfg = config.default();
+    try std.testing.expectEqualStrings(cfg.glyphs.tree, Tile.tree.glyph(&cfg));
+    try std.testing.expectEqualStrings(cfg.glyphs.grass, Tile.grass.glyph(&cfg));
+    try std.testing.expectEqualStrings(cfg.glyphs.water, Tile.water.glyph(&cfg));
+    try std.testing.expectEqualStrings(cfg.glyphs.town_center, Tile.town_center.glyph(&cfg));
 }
 
 test "is_walkable on Tile" {
@@ -330,13 +347,19 @@ test "is_walkable on Tile" {
 }
 
 test "is_walkable on GameMap" {
-    var m = GameMap.init(99, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 99, 80, 40, &cfg);
+    defer m.deinit(allocator);
     try std.testing.expect(m.is_walkable(m.player_tc_x, m.player_tc_y));
     try std.testing.expect(!m.is_walkable(80, 0));
 }
 
 test "set changes a tile" {
-    var m = GameMap.init(99, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 99, 80, 40, &cfg);
+    defer m.deinit(allocator);
     const tx = m.player_tc_x + 1;
     const ty = m.player_tc_y;
     m.set(tx, ty, .house);
@@ -344,19 +367,30 @@ test "set changes a tile" {
 }
 
 test "set ignores out of bounds" {
-    var m = GameMap.init(99, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 99, 80, 40, &cfg);
+    defer m.deinit(allocator);
     m.set(80, 0, .house);
     try std.testing.expectEqual(.water, m.at(80, 0));
 }
 
 test "path exists between TCs" {
-    var m = GameMap.init(42, 80, 40);
-    try std.testing.expect(m.has_path(m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y));
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 42, 80, 40, &cfg);
+    defer m.deinit(allocator);
+    try std.testing.expect(m.has_path(allocator, m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y));
 }
 
 test "has_path returns false for blocked maps" {
+    const allocator = std.testing.allocator;
+    const map_size: usize = 10 * 10;
+    const tiles = try allocator.alloc(Tile, map_size);
+    defer allocator.free(tiles);
+    for (tiles) |*t| t.* = .grass;
     var m: GameMap = .{
-        .tiles = undefined,
+        .tiles = tiles,
         .width = 10,
         .height = 10,
         .player_tc_x = 0,
@@ -364,41 +398,54 @@ test "has_path returns false for blocked maps" {
         .enemy_tc_x = 9,
         .enemy_tc_y = 9,
     };
-    for (&m.tiles) |*row| {
-        for (row) |*t| t.* = .grass;
-    }
     for (0..10) |y| {
-        m.tiles[y][5] = .water;
+        m.tiles[y * 10 + 5] = .water;
     }
-    try std.testing.expect(!m.has_path(0, 0, 9, 9));
+    try std.testing.expect(!m.has_path(allocator, 0, 0, 9, 9));
 }
 
 test "deer_count scales with map size" {
-    var m80 = GameMap.init(1, 80, 40);
-    var m120 = GameMap.init(1, 120, 50);
-    try std.testing.expect(m120.deer_count() > m80.deer_count());
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m80 = try GameMap.init(allocator, 1, 80, 40, &cfg);
+    defer m80.deinit(allocator);
+    var m120 = try GameMap.init(allocator, 1, 120, 50, &cfg);
+    defer m120.deinit(allocator);
+    try std.testing.expect(m120.deer_count(&cfg) > m80.deer_count(&cfg));
 }
 
 test "deer_count minimum is 4" {
-    var m = GameMap.init(1, 20, 10);
-    try std.testing.expect(m.deer_count() >= 4);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 1, 20, 10, &cfg);
+    defer m.deinit(allocator);
+    try std.testing.expect(m.deer_count(&cfg) >= 4);
 }
 
 test "near_tc detects proximity" {
-    var m = GameMap.init(42, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 42, 80, 40, &cfg);
+    defer m.deinit(allocator);
     try std.testing.expect(m.near_tc(m.player_tc_x, m.player_tc_y, 1));
     try std.testing.expect(!m.near_tc(m.width - 1, m.height - 1, 2));
 }
 
 test "init always has path between TCs" {
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
     for (0..20) |seed| {
-        var m = GameMap.init(seed, 80, 40);
-        try std.testing.expect(m.has_path(m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y));
+        var m = try GameMap.init(allocator, seed, 80, 40, &cfg);
+        defer m.deinit(allocator);
+        try std.testing.expect(m.has_path(allocator, m.player_tc_x, m.player_tc_y, m.enemy_tc_x, m.enemy_tc_y));
     }
 }
 
 test "init clears walkable area around TCs" {
-    var m = GameMap.init(42, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 42, 80, 40, &cfg);
+    defer m.deinit(allocator);
     const offsets = [_]struct { dx: isize, dy: isize }{
         .{ .dx = 1, .dy = 0 }, .{ .dx = -1, .dy = 0 },
         .{ .dx = 0, .dy = 1 }, .{ .dx = 0, .dy = -1 },
@@ -417,7 +464,10 @@ test "init clears walkable area around TCs" {
 }
 
 test "sector generation covers whole map" {
-    var m = GameMap.init(42, 120, 50);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 42, 120, 50, &cfg);
+    defer m.deinit(allocator);
     var tree_count: usize = 0;
     for (0..m.height) |y| {
         for (0..m.width) |x| {
@@ -440,8 +490,12 @@ test "sector generation covers whole map" {
 }
 
 test "different seeds produce different maps" {
-    var m1 = GameMap.init(1, 80, 40);
-    var m2 = GameMap.init(2, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m1 = try GameMap.init(allocator, 1, 80, 40, &cfg);
+    defer m1.deinit(allocator);
+    var m2 = try GameMap.init(allocator, 2, 80, 40, &cfg);
+    defer m2.deinit(allocator);
     var diffs: usize = 0;
     for (0..m1.height) |y| {
         for (0..m1.width) |x| {
@@ -452,7 +506,10 @@ test "different seeds produce different maps" {
 }
 
 test "clear radius is large enough for walking" {
-    var m = GameMap.init(42, 80, 40);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m = try GameMap.init(allocator, 42, 80, 40, &cfg);
+    defer m.deinit(allocator);
     for (0..4) |dy| {
         for (0..4) |dx| {
             const x = m.player_tc_x + dx;
@@ -465,8 +522,12 @@ test "clear radius is large enough for walking" {
 }
 
 test "clusters are larger with bigger maps" {
-    var m_small = GameMap.init(42, 40, 20);
-    var m_large = GameMap.init(42, 160, 80);
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
+    var m_small = try GameMap.init(allocator, 42, 40, 20, &cfg);
+    defer m_small.deinit(allocator);
+    var m_large = try GameMap.init(allocator, 42, 160, 80, &cfg);
+    defer m_large.deinit(allocator);
     var small_trees: usize = 0;
     var large_trees: usize = 0;
     for (0..m_small.height) |y| {
@@ -483,9 +544,12 @@ test "clusters are larger with bigger maps" {
 }
 
 test "water clusters exist on large maps" {
+    const cfg = config.default();
+    const allocator = std.testing.allocator;
     var any_water = false;
     for (0..5) |seed| {
-        var m = GameMap.init(seed, 120, 50);
+        var m = try GameMap.init(allocator, seed, 120, 50, &cfg);
+        defer m.deinit(allocator);
         for (0..m.height) |y| {
             for (0..m.width) |x| {
                 if (m.at(x, y) == .water) any_water = true;
