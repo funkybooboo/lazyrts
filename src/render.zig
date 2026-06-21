@@ -35,12 +35,13 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
 
             if (spatial.unit_at(state, unit_x, unit_y)) |ui| {
                 const u = &state.units[ui];
-                const is_selected = state.selected_unit != null and state.selected_unit.? == ui;
+                const is_selected = game.is_unit_selected(state, ui);
                 const s = cell_style(.unit, color.unit_color(u, cfg), is_selected, is_cursor, cfg);
                 canvas.write_cell(screen_x, screen_y, u.kind.glyph(state.cfg), s);
             } else if (spatial.building_at(state, unit_x, unit_y)) |bi| {
                 const b = &state.buildings[bi];
-                const s = cell_style(.building, color.building_color(b, cfg), false, is_cursor, cfg);
+                const is_selected = state.selected_building != null and state.selected_building.? == bi;
+                const s = cell_style(.building, color.building_color(b, cfg), is_selected, is_cursor, cfg);
                 canvas.write_cell(screen_x, screen_y, b.kind.glyph(state.cfg), s);
             } else if (spatial.nature_at(state, unit_x, unit_y)) |ni| {
                 const n = &state.nature[ni];
@@ -48,7 +49,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
                 canvas.write_cell(screen_x, screen_y, n.kind.glyph(state.cfg), s);
             } else {
                 const t = state.world.at(unit_x, unit_y);
-                var s = tile_style(t, cfg);
+                var s = tile_style(t, unit_x, unit_y, state, cfg);
                 if (is_cursor) s.reverse = true;
                 canvas.write_cell(screen_x, screen_y, t.glyph(state.cfg), s);
             }
@@ -123,10 +124,10 @@ fn draw_row_labels(canvas: terminal.Canvas, lw: u16, hh: u16, map_h: u16, state:
     }
 }
 
-fn tile_style(t: map.Tile, cfg: *const config.Config) terminal.Style {
+fn tile_style(t: map.Tile, x: usize, y: usize, state: *const game.State, cfg: *const config.Config) terminal.Style {
     return switch (t) {
         .grass => .{},
-        .tree => .{ .fg = .{ .rgb = cfg.colors.tile_tree } },
+        .tree => .{ .fg = .{ .rgb = color.tree_tile_color(state.world.tree_remaining_at(x, y), cfg.economy.tree_total_yield, cfg) } },
         .water => .{ .fg = .{ .rgb = cfg.colors.tile_water } },
         .town_center, .house, .barracks => .{ .fg = .{ .rgb = cfg.colors.building_tile } },
     };

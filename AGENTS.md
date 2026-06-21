@@ -44,8 +44,11 @@ contain game logic. `test` block references all modules so
 Single source of truth for all constants and configuration values.
 
 - All numeric constants, colors, sizes, limits live here
-- Organized by domain: `tick_rate`, `map_dims`, `entity_limits`, `unit_hp`, `building_hp`, `deer`, `map_gen`, `ui`, `timing`, `colors`
-- Other modules import and re-export as aliases for backward compatibility
+- Organized by domain: `tick_rate`, `pop_per_housing`, `economy`,
+  `selection`, `map_dims`, `entity_limits`, `unit_hp`, `nature_hp`,
+  `building_hp`, `deer`, `map_gen`, `ui`, `timing`, `colors`
+- `economy` block: yields, carry capacity, gather timers, hunt
+  radius, resow cost
 - Testable: can override values for testing by importing config directly
 - No runtime overhead: all values are compile-time constants
 
@@ -55,20 +58,25 @@ Single source of truth for all constants and configuration values.
 logic is free functions.
 
 - State fields: cursor position, quit flag, world map, unit list,
-  building list, selected_units (multiselect), gather mode state
-- `init(seed)` creates State with fresh map + both TCs registered as
-  buildings
-- Free functions: `moveCursor`, `tick`, `spawnWorker`, `spawnUnit`,
-  `moveSelected`, `selectNext`, `selectIdleWorkers`,
-  `selectAllWorkers`, `selectIdleFighters`, `selectAllFighters`,
-  `selectNextBuilding`, `unitAt`, `buildingAt`, `playerTC`
-- Workers have persistent task states: gathering_wood,
-  gathering_food, hunting, constructing
-- `spawnUnit(kind, owner, cx, cy)` -- parameterized for AI use
+  building list, nature list, selection (multiselect list +
+  selected_building), food/wood counters, coord_mode, gather_mode
+- `init(seed)` creates State with fresh map + both TCs + starting
+  workers + starting player farm + deer herds
+- Free functions: `move_cursor`, `tick`, `spawn_worker`, `spawn_unit`,
+  `move_selected`, `select_next`/`select_prev`, `select_single`,
+  `select_add`, `select_clear`, `select_idle_workers`,
+  `select_all_workers`, `select_next_building`/`select_prev_building`,
+  `is_unit_selected`, `primary_selected`, `gather_at_cursor`,
+  `gather_nearest`, `resow_selected`, `player_tc`, `player_pop`,
+  `player_pop_cap`, `elapsed_seconds`
+- `tick()` dispatches moving units vs gather-state units to
+  `economy.tick_unit`
+- Deer spawn in herds: one near each TC, rest scattered with
+  min spacing between herd centers
+- `spawn_unit(kind, owner, cx, cy)` -- parameterized for AI use
   (milestone 8)
-- `findSpawn` is file-private, takes `*const GameMap` not `*State`
-- `playerTC` finds player TC position from buildings array
-- Every milestone adds fields + functions here
+- `find_spawn` is file-private
+- `player_tc` finds player TC position from buildings array
 
 ### map.zig
 
@@ -80,49 +88,86 @@ logic is free functions.
   tile.
 - `GameMap.init(seed)` generates terrain with two TC starts
 - `GameMap.at(x, y)` with bounds check (returns `.water` for OOB)
-- `GameMap.isWalkable(x, y)` delegates to `Tile.isWalkable()` with
+- `GameMap.is_walkable(x, y)` delegates to `Tile.isWalkable()` with
   bounds check
-- TC positions as named constants: `PLAYER_TC_X/Y`,
-  `ENEMY_TC_X/Y`, `TC_CLEAR_RADIUS`
+- `GameMap.tree_remaining[]` -- per-tile wood remaining; initialized
+  to `tree_total_yield` when tree placed
+- `GameMap.deplete_tree(x, y, amount)` -- drains wood, flips tile
+  to grass at 0
+- `GameMap.tree_remaining_at(x, y)` -- query for render coloring
+- TC positions: `player_tc_x/y`, `enemy_tc_x/y`
 - No entity tiles (`.worker`, `.soldier`). Entities are separate
   from terrain.
-- Color/style lives in `render.zig`, never in `map.zig`
+- Color/style lives in `render.zig`/`color.zig`, never in `map.zig`
 
-### entity.zig
+### unit.zig
 
-`Unit` and `Building` types + shared types. Pure data + `Unit.step()`
-movement.
+`Unit` + shared types. Pure data + `Unit.step()` movement.
 
 - `Pos` -- 2D coordinate, `x`/`y` as `usize`
 - `Owner` -- `player` or `enemy` or `neutral`
-- `UnitKind` -- `worker` or `soldier` or `deer`, with `glyph()` and
-  `maxHp()`
-- `BuildingKind` -- `town_center`, `house`, `barracks`, `farm`,
-  `drop_pile`, with `glyph()`, `maxHp()`, `label()`, `cost()`,
-  `size()`, `damage_to()`
+- `UnitKind` -- `worker` or `soldier`, with `glyph()` and `maxHp()`
 - `UnitState` -- `idle`, `moving`, `gathering_wood`,
   `gathering_food`, `hunting`, `constructing`
-- `Unit` -- x, y, kind, owner, hp, state, path, gather_target.
-  `pos()`, `step()` methods.
+- `GatherPhase` -- `none`, `to_resource`, `harvesting`, `to_depot`
+- `CarryKind` -- `none`, `wood`, `food`
+- `Unit` -- x, y, kind, owner, hp, state, path, gather_phase,
+  gather_target, gather_timer, carry, carry_kind, target_deer_idx,
+  target_farm_idx, grove_anchor. `pos()`, `step()` methods.
 - Units regenerate 1 HP per 30 ticks, pauses 5 ticks after taking
-  damage. Workers fight at 3 dmg, soldiers at 8 dmg.
-- `Building` -- x, y, kind, owner, hp, build_progress. Multi-tile
-  (TC 3x3, House 2x2, Barracks 2x3, Farm 3x3, DropPile 1x1).
-  Repairable for 1/2 original wood cost.
-- One unit per tile, no stacking. Units must path around each other.
+  damage (milestone 6). Workers fight at 3 dmg, soldiers at 8 dmg.
+- `MAX_PATH`, `MAX_UNITS` live in `config.zig`
+
+### building.zig
+
+`Building` type. Pure data.
+
+- `BuildingKind` -- `town_center`, `house`, `barracks`, `farm`,
+  `drop_pile`, with `glyph()`, `maxHp()`, `label()`. `is_depot()`
+  returns true for TC and drop_pile.
+- `Building` -- x, y, kind, owner, hp, build_progress,
+  food_remaining, fallow, assigned_worker.
 - Building costs: House=30w, Barracks=25f+50w, Farm=60w,
   DropPile=50w, FarmResow=60w
 - Unit costs: Worker=50f, Soldier=60f+20w
-- Resource yields: Tree=100w, Farm=250f (then fallow), Deer=100f
-- `MAX_PATH`, `MAX_UNITS`, `MAX_BUILDINGS` -- constants
+- `MAX_BUILDINGS` lives in `config.zig`
+
+### nature.zig
+
+`Nature` (deer). Pure data + `wander()`.
+
+- `NatureKind` -- `deer`
+- `Nature` -- x, y, kind, hp, state, food_remaining, dead.
+- `max_food()` returns per-deer food capacity.
+- Dead deer stop wandering but remain harvestable until food=0.
+
+### economy.zig
+
+Resource counters, gather state machine, drop-off routing.
+
+- `find_nearest_depot`, `find_nearest_tree`, `find_nearest_deer`,
+  `find_free_farm` -- spatial queries for gather targeting
+- `tick_unit(s, i)` -- drives per-worker gather state machine:
+  to_resource -> harvesting -> to_depot -> loop
+- `start_gather_at`, `start_gather_nearest` -- entry points from
+  input.zig (G key, Shift+G menu)
+- `resow_farm`, `auto_resow` -- manual R key + auto-resow on return
+  when wood banked
+- `remove_deer` -- swap-remove, updates other workers' deer indices
+- State fields read/written: `food`, `wood` counters live in
+  `game.State`
 
 ### pathfinding.zig
 
-A* on the tile grid. Uses `GameMap.isWalkable()` for passability.
+A* on the tile grid. Uses `GameMap.is_walkable()` for passability.
 
-- `findPath(map, start, goal, out_path) ?usize` -- returns path
-  length or null
-- Stack-allocated working set (no heap).
+- `find_path(allocator, map, start, goal, out_path, blocked) ?usize`
+  -- returns path length or null. `blocked` is optional list of
+  extra impassable positions (other units).
+- `find_nearest_reachable(allocator, map, goal, blocked) ?Pos` --
+  BFS from goal outward, used when goal is blocked.
+- `has_path(allocator, map, start, goal) bool` -- used by map gen.
+- Working sets heap-allocated per call (freed on return).
 - Tested on straight line, obstacles, unreachable, same-tile,
   unwalkable goal.
 
@@ -168,11 +213,42 @@ No rendering, no I/O.
 Takes a `term.Canvas` and `*const State`, draws the frame.
 
 - `draw()` is the only public function.
-- `tileStyle()` and `entityStyle()` map data to visual style.
-- Uses `game.entityAt()` for entity overlay.
-- Fog of war: unexplored tiles render as unknown, explored tiles dim,
-  visible tiles bright (milestone 7)
+- `tile_style()` maps terrain to style; tree color reads
+  `tree_remaining_at` for depletion shading.
+- Uses `spatial.*` for entity overlay. Resource tiles/entities
+  lighten as depleted (see `color.zig`).
+- Fog of war: unexplored tiles render as unknown (milestone 7)
 - No state mutation. Pure rendering.
+
+### color.zig
+
+Color helpers. Pure.
+
+- `unit_color`, `building_color`, `nature_color` -- blend by HP /
+  build progress / food remaining
+- `tree_tile_color` -- lerp tree color by `tree_remaining` ratio
+- `resource_ratio(remaining, total) f32`
+- Depleted resource colors defined in `config.colors`
+
+### drawer.zig
+
+Bottom info panel. Pure rendering.
+
+- `draw(canvas, state)` -- tile info, selection (unit group or
+  building), food/wood counters, pop/cap, time, hotkey help
+- Building selection shows: HP, depot tag, pop contribution, farm
+  food/fallow/worker status, build progress, position
+
+### spatial.zig
+
+Entity-by-position queries. Pure.
+
+- `unit_at`, `building_at`, `nature_at`, `nature_at_except`,
+  `occupied`, `collect_blocked`
+
+### coord.zig, fmt.zig
+
+Coordinate parsing/formatting and uint formatting helpers.
 
 ### terminal.zig
 
@@ -183,12 +259,13 @@ Terminal.
   API)
 - `Style` -- `fg`, `bg`, `bold`, `reverse` only
 - `Key` -- `kind` (char/arrow/tab/enter/escape/unknown), `char_val`,
-  `ctrl`. Query methods: `isChar`, `isCtrl`, `isLeft`, etc.
+  `ctrl`, `shift`. Query methods: `is_char`, `is_ctrl`, `is_left`,
+  etc.
 - `Event` -- `key_press` or `resize`
-- `Canvas` -- `clear`, `writeCell`, `width`, `height`
-- `Terminal` -- `init`, `deinit`, `pollEvent`, `canvas`, `present`
-- Conversion functions `fromVaxisKey`, `toVaxisStyle`,
-  `toVaxisColor` tested against vaxis types.
+- `Canvas` -- `clear`, `write_cell`, `write_str`, `width`, `height`
+- `Terminal` -- `init`, `deinit`, `poll_event`, `canvas`, `present`
+- Conversion functions `from_vaxis_key`, `to_vaxis_style`,
+  `to_vaxis_color` tested against vaxis types.
 - If vaxis breaks on upgrade, these tests fail immediately.
 
 ## Adding a New Module (from milestone 3 onward)

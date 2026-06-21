@@ -27,7 +27,7 @@ If it's not in this table, the answer is *no*.
 | House       | -    | 30   | 2x2  | 200 | +5  |                               |
 | Barracks    | 25   | 50   | 2x3  | 300 | -   | Trains soldiers               |
 | Farm        | -    | 60   | 3x3  | 100 | -   | 250 food then fallow, resow 60|
-| Drop Pile   | -    | 50   | 1x1  | 150 | -   | Resource depot                |
+| Drop Pile   | -    | 50   | 1x1  | 100 | -   | Resource depot                |
 
 ### Units
 
@@ -41,9 +41,9 @@ If it's not in this table, the answer is *no*.
 
 | Source | Yield      | Notes                                       |
 |--------|------------|---------------------------------------------|
-| Tree   | 100 wood   | Each tile in grove depleted individually    |
-| Farm   | 250 food   | Then fallow, resow for 60 wood              |
-| Deer   | 100 food   | Worker hunts nearby deer until told to stop |
+| Tree   | 100 wood (10/trip) | Each tile drained over 10 trips; lightens as depleted |
+| Farm   | 250 food (10/trip) | Then fallow, resow for 60 wood; auto-resow if wood banked |
+| Deer   | 100 food (10/trip) | Dies on first hunt, carcass drained over 10 trips |
 
 One unit per tile. Workers drop off at nearest depot (TC or Drop
 Pile). Repair costs half original wood cost.
@@ -55,20 +55,28 @@ taking damage.
 
 Workers are persistent. Set once, they keep going.
 
-- **Wood (G on tree):** Move to grove edge, chop tile by tile
-  (100 wood each), drop off at nearest depot. Stop when grove gone.
-- **Deer (G on deer):** Hunt deer (100 food each), keep hunting
-  nearby. Drop off at nearest depot.
-- **Farm (G on farm):** One worker per farm. Produces 250 food then
-  goes fallow. Resow with R (60 wood).
+- **Wood (G on tree):** Move to grove edge, chop tile (10 wood/trip,
+  100 per tile), drop off at nearest depot. Stop when grove gone.
+- **Deer (G on deer):** Hunt deer (10 food/trip, 100 total). Deer
+  dies on first hunt, stays as carcass, lightens as drained, removed
+  at 0. Keep hunting nearby deer until told to stop.
+- **Farm (G on farm):** One worker per farm. Produces 250 food (10/trip)
+  then goes fallow. Resow with R (60 wood) or auto-resow on return if
+  wood banked.
 - **Build (B menu):** Worker constructs, keeps building until done
-  or told to stop.
-- **Shift+G:** Auto-find nearest resource.
+  or told to stop. (milestone 4)
+- **Shift+G:** Auto-find nearest resource (W=wood, D=deer, F=farm).
+
+Resource tiles/entities lighten in color as they deplete and
+disappear when empty. Deer spawn in herds (one near each TC, rest
+scattered with min spacing); herd deer wander within a radius of
+their herd center.
 
 ## Sim model
 
-10 Hz logic tick, deterministic. Render on dirty, capped 30 Hz.
-Single thread. No heap in hot path.
+10 Hz logic tick, deterministic. Single thread. No heap in hot path.
+Render every frame, capped by frame sleep. A* for pathfinding (heap
+per call, freed on return).
 
 ## Rendering
 
@@ -85,7 +93,7 @@ in the drawer.
 | `H`   | House      |
 | `B`   | Barracks   |
 | `F`   | Farm       |
-| `D`   | Drop Pile  |
+| `P`   | Drop Pile  |
 | `w`   | Worker     |
 | `s`   | Soldier    |
 | `d`   | Deer       |

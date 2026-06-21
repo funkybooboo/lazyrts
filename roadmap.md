@@ -57,31 +57,31 @@ Workers gather resources persistently, drop off at TC or Drop Pile, counters inc
 
 **Done when:**
 
-- [ ] G key: selected worker enters gather mode at cursor target (tree, deer, farm)
-- [ ] Shift+G: worker auto-finds nearest resource of type (wood/deer/farm menu)
-- [ ] Grove gathering: worker moves to edge of tree cluster, chops tile by tile until grove depleted, then returns idle
-- [ ] Deer hunting: worker hunts deer, continues hunting nearby deer until told to stop
-- [ ] Farm gathering: one worker per farm, farms produce food until depleted, then go fallow
-- [ ] Farm resow: R key resows a fallow farm for 60 wood, worker resumes gathering
-- [ ] Drop Pile building: workers drop resources here instead of walking to TC
-- [ ] Workers drop off at nearest owned depot (TC or Drop Pile)
-- [ ] Persistent tasks: workers keep working until told otherwise (no micro per tree)
-- [ ] C key: cursor coordinate input mode
-- [ ] W key: select all idle workers
-- [ ] Shift+Tab: cycle through player buildings
-- [ ] Multiselect: Shift+direction adds units to selection
-- [ ] Resource counters (food, wood) displayed in drawer
-- [ ] Population / pop cap displayed in drawer
-- [ ] Drawer expands to show selected group info (unit count, types)
-- [ ] Unit tests: resource arithmetic, drop-off logic, persistent gather state, grove depletion, farm depletion/resow, drop pile routing
+- [x] G key: selected worker enters gather mode at cursor target (tree, deer, farm)
+- [x] Shift+G: worker auto-finds nearest resource of type (wood/deer/farm menu)
+- [x] Grove gathering: worker moves to edge of tree cluster, chops tile by tile until grove depleted, then returns idle
+- [x] Deer hunting: worker hunts deer, continues hunting nearby deer until told to stop
+- [x] Farm gathering: one worker per farm, farms produce food until depleted, then go fallow
+- [x] Farm resow: R key resows a fallow farm for 60 wood, worker resumes gathering (also auto-resows on return if wood banked)
+- [x] Workers drop off at nearest owned depot (TC or Drop Pile)
+- [x] Persistent tasks: workers keep working until told otherwise (no micro per tree)
+- [x] C key: cursor coordinate input mode
+- [x] W key: select all idle workers
+- [x] n / N keys: cycle through player buildings (Shift+Tab reclaimed for back-cycle units)
+- [x] Multiselect: Shift+direction adds units to selection
+- [x] Resource counters (food, wood) displayed in drawer
+- [x] Population / pop cap displayed in drawer
+- [x] Drawer expands to show selected group info (unit count, types)
+- [x] Resource depletion shown by tile color (tree/deer/farm lighten as drained, disappear when empty)
+- [x] Unit tests: resource arithmetic, drop-off logic, persistent gather state, grove depletion, farm depletion/resow, drop pile routing
 
 #### Resource Yields
 
 | Source    | Resource | Yield        | Notes                                               |
 | --------- | -------- | ------------ | --------------------------------------------------- |
-| Tree tile | Wood     | 100 per tile | Grove = cluster, each tile depleted individually    |
-| Farm      | Food     | 250 total    | Then goes fallow, resow for 60 wood                 |
-| Deer      | Food     | 100 per deer | Worker keeps hunting nearby deer until told to stop |
+| Tree tile | Wood     | 10/trip (100 total) | Grove = cluster, each tile depleted over 10 trips |
+| Farm      | Food     | 10/trip (250 total)  | Then goes fallow, resow for 60 wood                |
+| Deer      | Food     | 10/trip (100 total) | Worker keeps hunting nearby deer until told to stop |
 
 **Ships:** You can gather wood, hunt deer, work farms. Workers are persistent — set and forget. Drop Piles shorten trips. The core economic loop works.
 

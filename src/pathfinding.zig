@@ -246,6 +246,7 @@ test "find_path: straight line" {
     for (tiles) |*t| t.* = .grass;
     const m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -269,6 +270,7 @@ test "find_path: around obstacle" {
     for (tiles) |*t| t.* = .grass;
     var m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -293,6 +295,7 @@ test "find_path: unreachable" {
     for (tiles) |*t| t.* = .grass;
     var m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -321,6 +324,7 @@ test "find_path: start equals goal" {
     for (tiles) |*t| t.* = .grass;
     const m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -342,6 +346,7 @@ test "find_path: goal is unwalkable" {
     for (tiles) |*t| t.* = .grass;
     var m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -364,6 +369,7 @@ test "find_path: start is unwalkable" {
     for (tiles) |*t| t.* = .grass;
     var m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -386,6 +392,7 @@ test "find_path: diagonal path" {
     for (tiles) |*t| t.* = .grass;
     const m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -407,6 +414,7 @@ test "find_path: corridor" {
     for (tiles) |*t| t.* = .grass;
     var m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -433,6 +441,7 @@ test "find_path: blocked positions" {
     for (tiles) |*t| t.* = .grass;
     const m: map.GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,

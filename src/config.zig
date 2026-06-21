@@ -2,6 +2,30 @@ pub const Config = struct {
     tick_rate: usize = 10,
     pop_per_housing: usize = 5,
 
+    starting_food: u32 = 0,
+    starting_wood: u32 = 0,
+
+    economy: struct {
+        tree_yield: u16 = 10,
+        deer_yield: u16 = 10,
+        tree_total_yield: u16 = 100,
+        deer_total_yield: u16 = 100,
+        farm_yield_total: u16 = 250,
+        farm_harvest_per_trip: u16 = 10,
+        carry_capacity: u16 = 100,
+        chop_ticks: u16 = 10,
+        hunt_ticks: u16 = 8,
+        farm_harvest_ticks: u16 = 6,
+        deer_hunt_radius: usize = 12,
+        grove_scan_radius: usize = 8,
+        resow_wood_cost: u32 = 60,
+        depot_adjacent: bool = true,
+    } = .{},
+
+    selection: struct {
+        max_selected: usize = 128,
+    } = .{},
+
     glyphs: struct {
         worker: []const u8 = "w",
         soldier: []const u8 = "s",
@@ -10,6 +34,7 @@ pub const Config = struct {
         house: []const u8 = "H",
         barracks: []const u8 = "B",
         farm: []const u8 = "F",
+        drop_pile: []const u8 = "P",
         tree: []const u8 = "T",
         water: []const u8 = "~",
         grass: []const u8 = " ",
@@ -20,6 +45,7 @@ pub const Config = struct {
         house: []const u8 = "House",
         barracks: []const u8 = "Barracks",
         farm: []const u8 = "Farm",
+        drop_pile: []const u8 = "Drop",
         worker: []const u8 = "Worker",
         soldier: []const u8 = "Soldier",
         deer: []const u8 = "Deer",
@@ -37,7 +63,8 @@ pub const Config = struct {
         w_label: []const u8 = " W:",
         s_label: []const u8 = " S:",
         coord_help: []const u8 = "Enter=goto Esc=cancel",
-        main_help: []const u8 = "hjkl=move T=spawn M=move Tab=select C=coord Q=quit",
+        gather_help: []const u8 = "W=wood D=deer F=farm Esc=cancel",
+        main_help: []const u8 = "hjkl=move T=spawn M=move G=gather W=idle Q=quit",
     } = .{},
 
     map_dims: struct {
@@ -52,7 +79,7 @@ pub const Config = struct {
         max_path: usize = 256,
         max_units: usize = 128,
         max_buildings: usize = 32,
-        max_nature: usize = 64,
+        max_nature: usize = 256,
         max_blocked: usize = 256,
     } = .{},
     unit_hp: struct {
@@ -68,20 +95,27 @@ pub const Config = struct {
         house: u16 = 200,
         barracks: u16 = 300,
         farm: u16 = 100,
+        drop_pile: u16 = 100,
     } = .{},
 
     deer: struct {
         wander_interval: usize = 15,
         near_tc_percent: usize = 15,
-        min_near_tc: usize = 3,
+        min_near_tc: usize = 1,
         spawn_spread: usize = 12,
         spawn_offset: usize = 6,
         scatter_min_dist: usize = 2,
         spawn_seed_offset: u64 = 999,
-        area_divisor: usize = 600,
-        min_count: usize = 4,
+        area_divisor: usize = 300,
+        min_count: usize = 12,
         seed_mult_tick: u64 = 31,
         seed_mult_idx: u64 = 17,
+        scatter_herd_count: usize = 10,
+        herd_size: usize = 6,
+        herd_radius: usize = 3,
+        tc_herd_offset: usize = 8,
+        herd_min_spacing: usize = 12,
+        herd_wander_radius: usize = 5,
     } = .{},
 
     map_gen: struct {
@@ -149,7 +183,11 @@ pub const Config = struct {
 
         tile_grass: [3]u8 = .{ 30, 30, 30 },
         tile_tree: [3]u8 = .{ 30, 130, 30 },
+        tile_tree_depleted: [3]u8 = .{ 110, 210, 110 },
         tile_water: [3]u8 = .{ 40, 90, 180 },
+
+        nature_deer_depleted: [3]u8 = .{ 210, 175, 120 },
+        farm_food_depleted: [3]u8 = .{ 170, 220, 220 },
 
         player_unit_full: [3]u8 = .{ 0, 200, 200 },
         player_unit_damaged: [3]u8 = .{ 150, 235, 235 },

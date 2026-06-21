@@ -24,20 +24,15 @@ Zig 0.16.0. [libvaxis] fetched automatically.
 |--------------|--------------------------------|
 | hjkl / arrows| Move cursor                    |
 | Tab          | Cycle own units                |
-| Shift+Tab    | Cycle own buildings            |
+| Shift+Tab    | Cycle own units (reverse)      |
+| n / N        | Cycle own buildings            |
 | G            | Gather at cursor               |
-| Shift+G      | Auto-find nearest resource    |
-| J            | Jump to coordinate             |
-| M            | Move selected unit             |
+| Shift+G      | Auto-find nearest resource (W/D/F) |
+| C            | Jump to coordinate             |
+| M            | Move selected unit(s)          |
 | T            | Train worker at TC             |
 | W            | Select idle workers            |
-| Shift+W      | Select all workers             |
-| F            | Select idle fighters           |
-| Shift+F      | Select all fighters            |
-| B            | Build menu (H/F/D/R)          |
-| E            | Repair building                |
-| R            | Resow fallow farm              |
-| A            | Attack-move                    |
+| R            | Resow fallow farm (selected/cursor) |
 | Shift+dir    | Add unit to selection          |
 | Q / Ctrl-C   | Quit                           |
 
@@ -51,7 +46,7 @@ Zig 0.16.0. [libvaxis] fetched automatically.
 | House       | -    | 30   | 2x2  | 200 | +5  |
 | Barracks    | 25   | 50   | 2x3  | 300 | -   |
 | Farm        | -    | 60   | 3x3  | 100 | -   |
-| Drop Pile   | -    | 50   | 1x1  | 150 | -   |
+| Drop Pile   | -    | 50   | 1x1  | 100 | -   |
 
 Farms yield 250 food then go fallow. Resow for 60 wood.
 Repair costs half the original wood cost.
@@ -65,8 +60,17 @@ Repair costs half the original wood cost.
 
 ### Resources
 
-Trees give 100 wood. Deer give 100 food.
-Farms give 250 food then go fallow.
+Trees yield 10 wood per trip (100 total per tile, 10 trips to fell).
+Deer yield 10 food per trip (100 total; deer dies on first hunt,
+stays as a carcass, lightens as drained, removed at 0).
+Farms yield 10 food per trip (250 total, then fallow; resow 60 wood).
+
+Resource tiles/entities lighten in color as they deplete and
+disappear when empty.
+
+Deer spawn in herds: one near each TC, the rest scattered with
+minimum spacing between herd centers. Herd deer stay near their
+herd center when wandering.
 
 ## How it works
 
@@ -79,5 +83,5 @@ after taking damage.
 
 ## Status
 
-Milestone 2 shipped. Working on economy (milestone 3).
+Milestone 3 (economy) shipped. Working on buildings (milestone 4).
 See [roadmap.md](roadmap.md) for details.

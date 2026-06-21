@@ -61,6 +61,16 @@ pub fn health_ratio(hp: u16, max_hp: u16) f32 {
     return 1.0 - @as(f32, @floatFromInt(hp)) / @as(f32, @floatFromInt(max_hp));
 }
 
+pub fn resource_ratio(remaining: u16, total: u16) f32 {
+    if (total == 0) return 0.0;
+    return @as(f32, @floatFromInt(remaining)) / @as(f32, @floatFromInt(total));
+}
+
+pub fn tree_tile_color(remaining: u16, total: u16, cfg: *const config.Config) [3]u8 {
+    const ratio = resource_ratio(remaining, total);
+    return lerp_color(cfg.colors.tile_tree_depleted, cfg.colors.tile_tree, ratio);
+}
+
 pub fn unit_color(u: *const unit.Unit, cfg: *const config.Config) [3]u8 {
     const full = full_hp_color(u.owner, .unit, cfg);
     const damaged = damaged_color(u.owner, .unit, cfg);
@@ -70,22 +80,31 @@ pub fn unit_color(u: *const unit.Unit, cfg: *const config.Config) [3]u8 {
 
 pub fn nature_color(n: *const nature.Nature, cfg: *const config.Config) [3]u8 {
     const full = full_hp_color(.neutral, .unit, cfg);
-    const damaged = damaged_color(.neutral, .unit, cfg);
-    const ratio = health_ratio(n.hp, nature.max_hp(n.kind, cfg));
-    return lerp_color(full, damaged, ratio);
+    const depleted = cfg.colors.nature_deer_depleted;
+    const total = nature.max_food(n.kind, cfg);
+    const ratio = resource_ratio(n.food_remaining, total);
+    return lerp_color(depleted, full, ratio);
 }
 
 pub fn building_color(b: *const building.Building, cfg: *const config.Config) [3]u8 {
     const full = full_hp_color(b.owner, .building, cfg);
     const damaged = damaged_color(b.owner, .building, cfg);
     const hp_ratio = health_ratio(b.hp, building.max_hp(b.kind, cfg));
+    var base: [3]u8 = undefined;
     if (b.build_progress < 100) {
         const unbuilt = unbuilt_color(b.owner, cfg);
         const build_ratio = 1.0 - @as(f32, @floatFromInt(b.build_progress)) / 100.0;
-        const built_color = lerp_color(unbuilt, full, 1.0 - build_ratio);
-        return lerp_color(built_color, damaged, hp_ratio);
+        base = lerp_color(unbuilt, full, 1.0 - build_ratio);
+    } else {
+        base = full;
     }
-    return lerp_color(full, damaged, hp_ratio);
+    const hp_col = lerp_color(base, damaged, hp_ratio);
+    if (b.kind == .farm) {
+        const total = cfg.economy.farm_yield_total;
+        const ratio = resource_ratio(b.food_remaining, total);
+        return lerp_color(cfg.colors.farm_food_depleted, hp_col, ratio);
+    }
+    return hp_col;
 }
 
 pub const TileColor = struct {
@@ -255,8 +274,62 @@ test "neutral color distinct from enemy" {
     try std.testing.expect(!std.mem.eql(u8, &n, &e));
 }
 
-test "health_ratio at 1 HP out of 100" {
-    try std.testing.expectApproxEqAbs(@as(f32, 0.99), health_ratio(1, 100), 0.02);
+test "resource_ratio at full" {
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), resource_ratio(100, 100), 0.01);
+}
+
+test "resource_ratio at half" {
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), resource_ratio(50, 100), 0.01);
+}
+
+test "resource_ratio at zero total" {
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), resource_ratio(0, 0), 0.01);
+}
+
+test "tree_tile_color full equals tile_tree" {
+    const cfg = config.default();
+    const c = tree_tile_color(100, 100, &cfg);
+    try std.testing.expectEqual(cfg.colors.tile_tree[0], c[0]);
+}
+
+test "tree_tile_color depleted equals depleted color" {
+    const cfg = config.default();
+    const c = tree_tile_color(0, 100, &cfg);
+    try std.testing.expectEqual(cfg.colors.tile_tree_depleted[0], c[0]);
+}
+
+test "tree_tile_color gets lighter as depleted" {
+    const cfg = config.default();
+    const full = tree_tile_color(100, 100, &cfg);
+    const half = tree_tile_color(50, 100, &cfg);
+    const empty = tree_tile_color(0, 100, &cfg);
+    const full_sum = @as(u16, full[0]) + full[1] + full[2];
+    const half_sum = @as(u16, half[0]) + half[1] + half[2];
+    const empty_sum = @as(u16, empty[0]) + empty[1] + empty[2];
+    try std.testing.expect(half_sum > full_sum);
+    try std.testing.expect(empty_sum > half_sum);
+}
+
+test "nature_color gets lighter as food depletes" {
+    const cfg = config.default();
+    var n_full = nature.Nature{ .x = 0, .y = 0, .kind = .deer, .hp = 25, .food_remaining = 100 };
+    var n_empty = nature.Nature{ .x = 0, .y = 0, .kind = .deer, .hp = 25, .food_remaining = 0 };
+    const full = nature_color(&n_full, &cfg);
+    const empty = nature_color(&n_empty, &cfg);
+    const full_sum = @as(u16, full[0]) + full[1] + full[2];
+    const empty_sum = @as(u16, empty[0]) + empty[1] + empty[2];
+    try std.testing.expect(empty_sum > full_sum);
+}
+
+test "farm building_color gets lighter as food depletes" {
+    const cfg = config.default();
+    const b_full = building.Building{ .x = 0, .y = 0, .kind = .farm, .owner = .player, .hp = 100, .build_progress = 100, .food_remaining = 250 };
+    const b_empty = building.Building{ .x = 0, .y = 0, .kind = .farm, .owner = .player, .hp = 100, .build_progress = 100, .food_remaining = 0, .fallow = true };
+    const full = building_color(&b_full, &cfg);
+    const empty = building_color(&b_empty, &cfg);
+    const full_sum = @as(u16, full[0]) + full[1] + full[2];
+    const empty_sum = @as(u16, empty[0]) + empty[1] + empty[2];
+    try std.testing.expect(empty_sum > full_sum);
 }
 
 test "unit_color enemy at full HP" {

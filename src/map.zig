@@ -43,6 +43,7 @@ pub const Tile = enum {
 
 pub const GameMap = struct {
     tiles: []Tile,
+    tree_remaining: []u16,
     width: u16,
     height: u16,
     player_tc_x: u16,
@@ -56,6 +57,9 @@ pub const GameMap = struct {
 
         const tiles = try allocator.alloc(Tile, map_width * map_height);
         errdefer allocator.free(tiles);
+        const tree_remaining = try allocator.alloc(u16, map_width * map_height);
+        errdefer allocator.free(tree_remaining);
+        @memset(tree_remaining, 0);
 
         const player_tc_x_pos: usize = map_width * cfg.map_gen.player_tc_x_pct / 100;
         const player_tc_y_pos: usize = map_height / 2;
@@ -64,6 +68,7 @@ pub const GameMap = struct {
 
         var m: GameMap = .{
             .tiles = tiles,
+            .tree_remaining = tree_remaining,
             .width = @intCast(map_width),
             .height = @intCast(map_height),
             .player_tc_x = @intCast(player_tc_x_pos),
@@ -128,7 +133,7 @@ pub const GameMap = struct {
         // Scattered trees: break up grove monotony
         const scatter_pct = rng.intRangeAtMost(usize, cfg.map_gen.scatter_tree_min, cfg.map_gen.scatter_tree_max);
         if (scatter_pct > 0) {
-            m.scatterTrees(rng, scatter_pct, tc_clear);
+            m.scatterTrees(rng, scatter_pct, tc_clear, cfg);
         }
 
         // Guaranteed starting grove near each TC
@@ -147,7 +152,9 @@ pub const GameMap = struct {
 
     pub fn deinit(self: *GameMap, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
+        allocator.free(self.tree_remaining);
         self.tiles = &[_]Tile{};
+        self.tree_remaining = &[_]u16{};
     }
 
     pub fn at(self: *const GameMap, x: usize, y: usize) Tile {
@@ -161,7 +168,25 @@ pub const GameMap = struct {
 
     pub fn set(self: *GameMap, x: usize, y: usize, tile: Tile) void {
         if (x >= self.width or y >= self.height) return;
-        self.tiles[y * self.width + x] = tile;
+        const idx = y * self.width + x;
+        self.tiles[idx] = tile;
+        if (tile != .tree) self.tree_remaining[idx] = 0;
+    }
+
+    pub fn tree_remaining_at(self: *const GameMap, x: usize, y: usize) u16 {
+        if (x >= self.width or y >= self.height) return 0;
+        return self.tree_remaining[y * self.width + x];
+    }
+
+    pub fn deplete_tree(self: *GameMap, x: usize, y: usize, amount: u16) void {
+        if (x >= self.width or y >= self.height) return;
+        const idx = y * self.width + x;
+        if (self.tree_remaining[idx] <= amount) {
+            self.tree_remaining[idx] = 0;
+            self.tiles[idx] = .grass;
+        } else {
+            self.tree_remaining[idx] -= amount;
+        }
     }
 
     fn clear(self: *GameMap, center_x: usize, center_y: usize, radius: usize) void {
@@ -204,6 +229,7 @@ pub const GameMap = struct {
             if (cand.x < self.width and cand.y < self.height) {
                 if (self.tiles[cand.y * self.width + cand.x] == .grass and !self.near_tc(cand.x, cand.y, tc_clear + cfg.map_gen.cluster_tc_buffer)) {
                     self.tiles[cand.y * self.width + cand.x] = tile;
+                    if (tile == .tree) self.tree_remaining[cand.y * self.width + cand.x] = cfg.economy.tree_total_yield;
                     placed += 1;
                     const offsets = [_]struct { dx: isize, dy: isize }{
                         .{ .dx = 0, .dy = -1 }, .{ .dx = 0, .dy = 1 },
@@ -228,7 +254,7 @@ pub const GameMap = struct {
         }
     }
 
-    fn scatterTrees(self: *GameMap, rng: std.Random, pct: usize, tc_clear: usize) void {
+    fn scatterTrees(self: *GameMap, rng: std.Random, pct: usize, tc_clear: usize, cfg: *const config.Config) void {
         const area = @as(usize, self.width) * @as(usize, self.height);
         const target = area * pct / 100;
         var placed: usize = 0;
@@ -239,6 +265,7 @@ pub const GameMap = struct {
             const y = rng.intRangeAtMost(usize, 0, self.height - 1);
             if (self.tiles[y * self.width + x] == .grass and !self.near_tc(x, y, tc_clear + 1)) {
                 self.tiles[y * self.width + x] = .tree;
+                self.tree_remaining[y * self.width + x] = cfg.economy.tree_total_yield;
                 placed += 1;
             }
         }
@@ -410,6 +437,7 @@ test "has_path returns false for blocked maps" {
     for (tiles) |*t| t.* = .grass;
     var m: GameMap = .{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 10,
         .height = 10,
         .player_tc_x = 0,

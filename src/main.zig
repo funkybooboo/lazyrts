@@ -56,4 +56,5 @@ test {
     _ = time;
     _ = @import("color.zig");
     _ = @import("fmt.zig");
+    _ = @import("economy.zig");
 }

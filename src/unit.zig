@@ -17,7 +17,11 @@ pub const UnitKind = enum {
     }
 };
 
-pub const UnitState = enum { idle, moving };
+pub const UnitState = enum { idle, moving, gathering_wood, gathering_food, hunting, constructing };
+
+pub const CarryKind = enum(u2) { none, wood, food };
+
+pub const GatherPhase = enum(u3) { none, to_resource, harvesting, to_depot };
 
 pub const Unit = struct {
     x: usize,
@@ -31,20 +35,28 @@ pub const Unit = struct {
     path_idx: usize = 0,
     dest: ?Pos = null,
 
+    gather_phase: GatherPhase = .none,
+    gather_target: ?Pos = null,
+    gather_timer: u16 = 0,
+    carry: u16 = 0,
+    carry_kind: CarryKind = .none,
+    target_deer_idx: ?usize = null,
+    target_farm_idx: ?usize = null,
+    grove_anchor: ?Pos = null,
+
     pub fn pos(self: *const Unit) Pos {
         return .{ .x = self.x, .y = self.y };
     }
 
     pub fn step(self: *Unit) void {
-        if (self.state != .moving) return;
         if (self.path_idx >= self.path_len) return;
         self.x = self.path[self.path_idx].x;
         self.y = self.path[self.path_idx].y;
         self.path_idx += 1;
         if (self.path_idx >= self.path_len) {
-            self.state = .idle;
             self.path_len = 0;
             self.path_idx = 0;
+            if (self.state == .moving) self.state = .idle;
         }
     }
 };

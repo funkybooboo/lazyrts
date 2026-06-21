@@ -23,6 +23,11 @@ pub const Nature = struct {
     kind: NatureKind,
     hp: u16,
     state: NatureState = .idle,
+    food_remaining: u16 = 0,
+    dead: bool = false,
+    herd_cx: usize = 0,
+    herd_cy: usize = 0,
+    herd_radius: usize = 5,
 };
 
 pub fn max_hp(kind: NatureKind, cfg: *const config.Config) u16 {
@@ -31,7 +36,14 @@ pub fn max_hp(kind: NatureKind, cfg: *const config.Config) u16 {
     };
 }
 
+pub fn max_food(kind: NatureKind, cfg: *const config.Config) u16 {
+    return switch (kind) {
+        .deer => cfg.economy.deer_total_yield,
+    };
+}
+
 pub fn wander(n: *Nature, map: anytype, state: anytype, tick_count: usize, idx: usize, cfg: *const config.Config) void {
+    if (n.dead) return;
     if (n.state != .idle) return;
     if (tick_count % cfg.deer.wander_interval != 0) return;
 
@@ -56,10 +68,12 @@ pub fn wander(n: *Nature, map: anytype, state: anytype, tick_count: usize, idx: 
         const unit_x: usize = @intCast(next_x);
         const unit_y: usize = @intCast(next_y);
         if (unit_x < map.width and unit_y < map.height and map.is_walkable(unit_x, unit_y)) {
-            // Check if not occupied by other entities
             if (spatial.unit_at(state, unit_x, unit_y) == null and
                 spatial.building_at(state, unit_x, unit_y) == null and
                 spatial.nature_at_except(state, unit_x, unit_y, idx) == null) {
+                const ddx = if (unit_x > n.herd_cx) unit_x - n.herd_cx else n.herd_cx - unit_x;
+                const ddy = if (unit_y > n.herd_cy) unit_y - n.herd_cy else n.herd_cy - unit_y;
+                if (ddx + ddy > n.herd_radius) continue;
                 valid_moves[valid_count] = i;
                 valid_count += 1;
             }
@@ -101,6 +115,7 @@ test "wander doesn't happen when state is wandering" {
     for (tiles) |*t| t.* = .grass;
     const m = game_map.GameMap{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -140,6 +155,7 @@ test "wander doesn't happen on wrong tick" {
     for (tiles) |*t| t.* = .grass;
     const m = game_map.GameMap{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,
@@ -179,6 +195,7 @@ test "wander attempts on correct tick" {
     for (tiles) |*t| t.* = .grass;
     const m = game_map.GameMap{
         .tiles = tiles,
+        .tree_remaining = &[_]u16{},
         .width = 80,
         .height = 40,
         .player_tc_x = 12,

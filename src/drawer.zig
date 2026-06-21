@@ -45,9 +45,19 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
     const rn_len = fmt.format_uint(row_num_buf[0..], state.cursor_y + 1);
     x = put(canvas, x, row1, row_num_buf[0..rn_len], val);
 
+    x = put(canvas, x, row1, "  Food:", label);
+    var food_buf: [8]u8 = undefined;
+    const flen = fmt.format_uint(food_buf[0..], state.food);
+    x = put(canvas, x, row1, food_buf[0..flen], yellow);
+    x = put(canvas, x, row1, " Wood:", label);
+    var wood_buf: [8]u8 = undefined;
+    const wlen = fmt.format_uint(wood_buf[0..], state.wood);
+    x = put(canvas, x, row1, wood_buf[0..wlen], brown);
+
     x = 1;
 
-    if (state.selected_unit) |si| {
+    if (state.selected_count > 0) {
+        const si = state.selected[0];
         if (si < state.unit_count) {
             const u = &state.units[si];
             x = put(canvas, x, row2, cfg.ui_text.sel_label, label);
@@ -59,6 +69,63 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
             x = put(canvas, x, row2, fmt_hp(&hp_buf1, u.hp, unit.max_hp(u.kind, state.cfg)), val);
             x = put(canvas, x, row2, " ", label);
             x = put(canvas, x, row2, state_label(u.state), val);
+            if (state.selected_count > 1) {
+                var gbuf: [8]u8 = undefined;
+                const glen = fmt.format_uint(gbuf[0..], state.selected_count);
+                x = put(canvas, x, row2, " x", label);
+                x = put(canvas, x, row2, gbuf[0..glen], cyan);
+            }
+        }
+    } else if (state.selected_building) |bi| {
+        if (bi < state.building_count) {
+            const b = &state.buildings[bi];
+            x = put(canvas, x, row2, cfg.ui_text.sel_label, label);
+            x = put(canvas, x, row2, b.kind.label(cfg), val);
+            x = put(canvas, x, row2, " ", label);
+            x = put(canvas, x, row2, owner_label(b.owner), owner_style(b.owner, cyan, red, brown));
+            var hp_buf3: [12]u8 = undefined;
+            x = put(canvas, x, row2, cfg.ui_text.hp_label, label);
+            x = put(canvas, x, row2, fmt_hp(&hp_buf3, b.hp, building.max_hp(b.kind, state.cfg)), val);
+            if (b.kind.is_depot()) x = put(canvas, x, row2, " depot", cyan);
+            if (pop_contribution(b.kind, cfg) > 0) {
+                var pbuf: [4]u8 = undefined;
+                const plen = fmt.format_uint(pbuf[0..], pop_contribution(b.kind, cfg));
+                x = put(canvas, x, row2, " Pop+", label);
+                x = put(canvas, x, row2, pbuf[0..plen], cyan);
+            }
+            if (b.kind == .farm) {
+                var fbuf: [8]u8 = undefined;
+                const fblen = fmt.format_uint(fbuf[0..], b.food_remaining);
+                x = put(canvas, x, row2, " Food:", label);
+                x = put(canvas, x, row2, fbuf[0..fblen], yellow);
+                if (b.fallow) {
+                    x = put(canvas, x, row2, " fallow", red);
+                    if (state.wood >= cfg.economy.resow_wood_cost) {
+                        x = put(canvas, x, row2, " (R)", dim);
+                    }
+                }
+                if (b.assigned_worker) |_| {
+                    x = put(canvas, x, row2, " worker", cyan);
+                } else if (!b.fallow and b.food_remaining > 0) {
+                    x = put(canvas, x, row2, " free", dim);
+                }
+            }
+            if (b.build_progress < building.BUILD_COMPLETE_PERCENT) {
+                x = put(canvas, x, row2, cfg.ui_text.build_label, label);
+                var bp_buf: [4]u8 = undefined;
+                const bp_len = fmt.format_uint(bp_buf[0..], b.build_progress);
+                x = put(canvas, x, row2, bp_buf[0..bp_len], val);
+                x = put(canvas, x, row2, "%", val);
+            } else {
+                x = put(canvas, x, row2, " done", dim);
+            }
+            x = put(canvas, x, row2, " @", label);
+            var cbuf: [3]u8 = undefined;
+            const cstr = coord.col_to_letters(b.x, &cbuf);
+            x = put(canvas, x, row2, cstr, val);
+            var rbuf: [8]u8 = undefined;
+            const rlen = fmt.format_uint(rbuf[0..], b.y + 1);
+            x = put(canvas, x, row2, rbuf[0..rlen], val);
         }
     } else if (spatial.unit_at(state, state.cursor_x, state.cursor_y)) |ui| {
         const u = &state.units[ui];
@@ -119,6 +186,8 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
         if (state.coord_len > 0) {
             canvas.write_str(cfg.ui.coord_input_offset, row3, state.coord_buf[0..state.coord_len], yellow);
         }
+    } else if (state.gather_mode) {
+        canvas.write_str(1, row3, cfg.ui_text.gather_help, dim);
     } else {
         canvas.write_str(1, row3, cfg.ui_text.main_help, dim);
     }
@@ -127,6 +196,13 @@ pub fn draw(canvas: terminal.Canvas, state: *const game.State) void {
 fn put(canvas: terminal.Canvas, x: u16, y: u16, text: []const u8, s: terminal.Style) u16 {
     canvas.write_str(x, y, text, s);
     return x + @as(u16, @intCast(text.len));
+}
+
+fn pop_contribution(k: building.BuildingKind, cfg: *const config.Config) usize {
+    return switch (k) {
+        .town_center, .house => cfg.pop_per_housing,
+        else => 0,
+    };
 }
 
 fn owner_style(o: unit.Owner, player: terminal.Style, enemy: terminal.Style, neutral: terminal.Style) terminal.Style {
@@ -141,6 +217,10 @@ fn state_label(s: unit.UnitState) []const u8 {
     return switch (s) {
         .idle => "idle",
         .moving => "moving",
+        .gathering_wood => "chop",
+        .gathering_food => "farm",
+        .hunting => "hunt",
+        .constructing => "build",
     };
 }
 
