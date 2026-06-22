@@ -174,7 +174,8 @@ pub const Terminal = struct {
 };
 
 fn fromVaxisKey(vk: vaxis.Key) Key {
-    const kind: Key.KeyKind = switch (vk.codepoint) {
+    const cp = vk.shifted_codepoint orelse vk.codepoint;
+    const kind: Key.KeyKind = switch (cp) {
         vaxis.Key.left => .left,
         vaxis.Key.right => .right,
         vaxis.Key.up => .up,
@@ -183,7 +184,7 @@ fn fromVaxisKey(vk: vaxis.Key) Key {
         vaxis.Key.enter => .enter,
         vaxis.Key.escape => .escape,
         else => blk: {
-            if (vk.codepoint < 128 and vk.codepoint >= 32) {
+            if (cp < 128 and cp >= 32) {
                 break :blk .char;
             }
             break :blk .unknown;
@@ -191,7 +192,7 @@ fn fromVaxisKey(vk: vaxis.Key) Key {
     };
     return .{
         .kind = kind,
-        .char_val = if (kind == .char) @intCast(vk.codepoint) else 0,
+        .char_val = if (kind == .char) @intCast(cp) else 0,
         .ctrl = vk.mods.ctrl,
         .shift = vk.mods.shift,
     };

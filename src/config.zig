@@ -177,6 +177,9 @@ pub const Config = struct {
         header_active: [3]u8 = .{ 255, 255, 255 },
         cursor_selected_bg: [3]u8 = .{ 40, 40, 40 },
         cursor_reversed_fg: [3]u8 = .{ 20, 20, 20 },
+        help_bg: [3]u8 = .{ 45, 55, 75 },
+        help_border: [3]u8 = .{ 120, 140, 180 },
+        help_body: [3]u8 = .{ 200, 200, 200 },
         building_tile: [3]u8 = .{ 200, 200, 200 },
 
         tile_grass: [3]u8 = .{ 30, 30, 30 },

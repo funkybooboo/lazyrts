@@ -106,9 +106,8 @@ const help_entries = [_]struct { key: []const u8, desc: []const u8 }{
 };
 
 fn drawHelp(canvas: terminal.Canvas, cfg: *const config.Config) void {
-    const border: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.header_active }, .bold = true };
     const label: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.header_active }, .bold = true };
-    const body: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.cursor_reversed_fg } };
+    const body: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.help_body } };
     const dim: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.header_dim } };
 
     var max_key: usize = 0;
@@ -120,7 +119,7 @@ fn drawHelp(canvas: terminal.Canvas, cfg: *const config.Config) void {
 
     const title = " lazyrts -- help ";
     const inner_w: usize = max_key + 2 + max_desc + 2;
-    const box_w: usize = @max(title.len, inner_w) + 2;
+    const box_w: usize = @max(title.len, inner_w) + 4;
     const box_h: usize = help_entries.len + 4;
 
     const cw: usize = @intCast(canvas.width());
@@ -129,23 +128,44 @@ fn drawHelp(canvas: terminal.Canvas, cfg: *const config.Config) void {
     const ox: usize = (cw - box_w) / 2;
     const oy: usize = (ch - box_h) / 2;
 
-    const fill_bg = cfg.colors.cursor_selected_bg;
+    const fill_bg = cfg.colors.help_bg;
+    const border_fg: [3]u8 = cfg.colors.help_border;
+
     for (0..box_h) |y| {
         for (0..box_w) |x| {
             canvas.writeCell(@intCast(ox + x), @intCast(oy + y), " ", .{ .bg = .{ .rgb = fill_bg } });
         }
     }
 
-    canvas.writeStr(@intCast(ox + 1), @intCast(oy), title, label);
+    const tl = "+"; const tr = "+"; const bl = "+"; const br = "+";
+    const horiz = "-"; const vert = "|";
+    const bstyle: terminal.Style = .{ .fg = .{ .rgb = border_fg }, .bg = .{ .rgb = fill_bg }, .bold = true };
 
-    for (0..box_w) |x| {
-        canvas.writeCell(@intCast(ox + x), @intCast(oy + 1), "-", border);
+    canvas.writeStr(@intCast(ox), @intCast(oy), tl, bstyle);
+    for (0..box_w - 2) |x| canvas.writeStr(@intCast(ox + 1 + x), @intCast(oy), horiz, bstyle);
+    canvas.writeStr(@intCast(ox + box_w - 1), @intCast(oy), tr, bstyle);
+
+    const title_x = ox + (box_w - title.len) / 2;
+    canvas.writeStr(@intCast(title_x), @intCast(oy), title, label);
+
+    for (0..box_h - 2) |y| {
+        canvas.writeStr(@intCast(ox), @intCast(oy + 1 + y), vert, bstyle);
+        canvas.writeStr(@intCast(ox + box_w - 1), @intCast(oy + 1 + y), vert, bstyle);
     }
 
+    canvas.writeStr(@intCast(ox), @intCast(oy + box_h - 1), bl, bstyle);
+    for (0..box_w - 2) |x| canvas.writeStr(@intCast(ox + 1 + x), @intCast(oy + box_h - 1), horiz, bstyle);
+    canvas.writeStr(@intCast(ox + box_w - 1), @intCast(oy + box_h - 1), br, bstyle);
+
+    const sep_y = oy + 2;
+    canvas.writeStr(@intCast(ox + 1), @intCast(sep_y), horiz, bstyle);
+    for (0..box_w - 4) |x| canvas.writeStr(@intCast(ox + 2 + x), @intCast(sep_y), horiz, bstyle);
+    canvas.writeStr(@intCast(ox + box_w - 2), @intCast(sep_y), horiz, bstyle);
+
     for (help_entries, 0..) |e, i| {
-        const ly: usize = oy + 2 + i;
-        canvas.writeStr(@intCast(ox + 1), @intCast(ly), e.key, label);
-        const desc_x: usize = ox + 1 + max_key + 2;
+        const ly: usize = oy + 3 + i;
+        canvas.writeStr(@intCast(ox + 2), @intCast(ly), e.key, label);
+        const desc_x: usize = ox + 2 + max_key + 2;
         canvas.writeStr(@intCast(desc_x), @intCast(ly), e.desc, body);
     }
 

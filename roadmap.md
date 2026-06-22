@@ -87,7 +87,46 @@ Workers gather resources persistently, drop off at TC or Drop Pile, counters inc
 
 ---
 
-### 4. Buildings
+### 4. Performance & concurrency
+
+Comprehensive performance overhaul: multithreaded tick architecture, algorithmic improvements, and rendering optimizations. Fix the bottlenecks before adding more entities.
+
+**Profiling:**
+
+- [ ] Tick timing instrumentation: per-stage timing visible (movement, gathering, pathfinding, render)
+- [ ] Identify hotspots with real data before optimizing
+
+**Algorithmic improvements:**
+
+- [ ] Spatial hash grid: O(1) entity lookup by position instead of O(n) linear scan
+- [ ] Path caching: don't recompute A* every tick for same destination; invalidate on obstacle change
+- [ ] Dirty rect rendering: only redraw changed cells, not entire map every frame
+- [ ] Batch spatial queries: collect entities in radius with grid lookup, not brute-force scan
+
+**Concurrency architecture:**
+
+- [ ] Command queue: user input (move, gather, attack, build) produced on main thread, consumed by sim thread — decouples input from tick
+- [ ] Unit update queue: units batched into jobs, processed by worker threads, results merged back
+- [ ] Wildlife update queue: deer/wildlife behavior processed as independent jobs
+- [ ] Render queue: final state snapshot pushed to render thread after sim tick completes
+- [ ] Generic producer-consumer primitives: lock-free ring buffers or bounded MPSC queues in lib/
+- [ ] Job scheduler: typed jobs enqueued with explicit dependencies, pulled by thread pool
+- [ ] Tick decomposed into independent stages (input → command drain → movement → gathering → combat → wildlife → render)
+- [ ] State partitioning: entity data sharded by position or owner to minimize contention between worker threads
+- [ ] Main thread owns render + input production; worker threads own sim job consumption
+- [ ] Deterministic: same inputs produce same output regardless of thread scheduling
+
+**Validation:**
+
+- [ ] Profiling harness: per-queue depth, per-job timing, thread utilization visible
+- [ ] Unit tests: queue ordering, producer-consumer correctness under concurrency, dependency resolution, deterministic output
+- [ ] Benchmark: 100 units tick time < 5ms (currently ~Xms, measure first)
+
+**Ships:** Tick runs as a pipeline of queues feeding worker threads. Spatial queries O(1). Pathfinding cached. Render dirty. Single-threaded fallback still works. Codebase scales to 200+ entities without frame drops.
+
+---
+
+### 5. Buildings
 
 Build House, Farm, Barracks, Drop Pile. Workers construct and repair persistently.
 
@@ -121,7 +160,7 @@ Build House, Farm, Barracks, Drop Pile. Workers construct and repair persistentl
 
 ---
 
-### 5. Military
+### 6. Military
 
 Train Soldier from Barracks. Selection controls for combat units.
 
@@ -141,7 +180,7 @@ Train Soldier from Barracks. Selection controls for combat units.
 
 ---
 
-### 6. Combat
+### 7. Combat
 
 Two armies fight (manual control of both sides).
 
@@ -169,7 +208,7 @@ Two armies fight (manual control of both sides).
 
 ---
 
-### 7. Fog of War
+### 8. Fog of War
 
 Unexplored tiles hidden, explored tiles stay visible permanently.
 
@@ -186,7 +225,7 @@ Unexplored tiles hidden, explored tiles stay visible permanently.
 
 ---
 
-### 8. AI
+### 9. AI
 
 Reactive opponent that adapts to player actions and game events.
 
@@ -208,7 +247,7 @@ Reactive opponent that adapts to player actions and game events.
 
 ---
 
-### 9. Win/lose
+### 10. Win/lose
 
 **Done when:**
 
@@ -218,11 +257,11 @@ Reactive opponent that adapts to player actions and game events.
 - [ ] No crash on endgame, no softlock
 - [ ] Unit tests: win condition detection (TC HP = 0)
 
-**Ships:** The game has a beginning, middle, and end. Milestones 1-9 form a complete game.
+**Ships:** The game has a beginning, middle, and end. Milestones 1-10 form a complete game.
 
 ---
 
-### 10. Multiplayer
+### 11. Multiplayer
 
 Human vs human over network.
 

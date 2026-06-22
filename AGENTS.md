@@ -288,13 +288,14 @@ Removed. Input lives in `ui/input.zig` (see above).
 1. Empty world
 2. One worker
 3. Economy (persistent gather, drop piles)
-4. Buildings (construct, repair, multi-tile)
-5. Military (training, selection shortcuts)
-6. Combat (all units fight, regeneration)
-7. Fog of war (exploration, vision)
-8. AI (reactive, strategy-switching)
-9. Win/lose (TC destruction, restart)
-10. Multiplayer (human vs human)
+4. Concurrency (queue architecture, producer-consumer, thread pool)
+5. Buildings (construct, repair, multi-tile)
+6. Military (training, selection shortcuts)
+7. Combat (all units fight, regeneration)
+8. Fog of war (exploration, vision)
+9. AI (reactive, strategy-switching)
+10. Win/lose (TC destruction, restart)
+11. Multiplayer (human vs human)
 
 ## Adding a New Entity Type
 
