@@ -32,43 +32,43 @@ pub const Key = struct {
         unknown,
     };
 
-    pub fn is_char(self: Key, ch: u8) bool {
+    pub fn isChar(self: Key, ch: u8) bool {
         return !self.ctrl and self.kind == .char and self.char_val == ch;
     }
 
-    pub fn is_ctrl(self: Key, ch: u8) bool {
+    pub fn isCtrl(self: Key, ch: u8) bool {
         return self.ctrl and self.kind == .char and self.char_val == ch;
     }
 
-    pub fn is_left(self: Key) bool {
+    pub fn isLeft(self: Key) bool {
         return self.kind == .left;
     }
 
-    pub fn is_right(self: Key) bool {
+    pub fn isRight(self: Key) bool {
         return self.kind == .right;
     }
 
-    pub fn is_up(self: Key) bool {
+    pub fn isUp(self: Key) bool {
         return self.kind == .up;
     }
 
-    pub fn is_down(self: Key) bool {
+    pub fn isDown(self: Key) bool {
         return self.kind == .down;
     }
 
-    pub fn is_tab(self: Key) bool {
+    pub fn isTab(self: Key) bool {
         return self.kind == .tab;
     }
 
-    pub fn is_shift_tab(self: Key) bool {
+    pub fn isShiftTab(self: Key) bool {
         return self.kind == .tab and self.shift;
     }
 
-    pub fn is_enter(self: Key) bool {
+    pub fn isEnter(self: Key) bool {
         return self.kind == .enter;
     }
 
-    pub fn is_escape(self: Key) bool {
+    pub fn isEscape(self: Key) bool {
         return self.kind == .escape;
     }
 };
@@ -105,19 +105,19 @@ pub const Canvas = struct {
         return self.win.height;
     }
 
-    pub fn write_cell(self: Canvas, x: u16, y: u16, glyph: []const u8, s: Style) void {
+    pub fn writeCell(self: Canvas, x: u16, y: u16, glyph: []const u8, s: Style) void {
         const g: []const u8 = if (glyph.len == 1 and glyph[0] < ASCII_TABLE_SIZE) ascii_table[glyph[0]] else glyph;
         self.win.writeCell(x, y, .{
             .char = .{ .grapheme = g },
-            .style = to_vaxis_style(s),
+            .style = toVaxisStyle(s),
         });
     }
 
-    pub fn write_str(self: Canvas, x: u16, y: u16, text: []const u8, s: Style) void {
+    pub fn writeStr(self: Canvas, x: u16, y: u16, text: []const u8, s: Style) void {
         var cx: u16 = x;
         for (text) |ch| {
             if (ch < MIN_PRINTABLE_CHAR or ch > MAX_PRINTABLE_CHAR) continue;
-            self.write_cell(cx, y, &[_]u8{ch}, s);
+            self.writeCell(cx, y, &[_]u8{ch}, s);
             cx += 1;
         }
     }
@@ -153,10 +153,10 @@ pub const Terminal = struct {
         self.tty.deinit();
     }
 
-    pub fn poll_event(self: *Terminal) !?Event {
+    pub fn pollEvent(self: *Terminal) !?Event {
         const vev = try self.loop.tryEvent() orelse return null;
         return switch (vev) {
-            .key_press => |vk| Event{ .key_press = from_vaxis_key(vk) },
+            .key_press => |vk| Event{ .key_press = fromVaxisKey(vk) },
             .winsize => |ws| blk: {
                 try self.vx.resize(self.alloc, self.tty.writer(), ws);
                 break :blk Event.resize;
@@ -173,7 +173,7 @@ pub const Terminal = struct {
     }
 };
 
-fn from_vaxis_key(vk: vaxis.Key) Key {
+fn fromVaxisKey(vk: vaxis.Key) Key {
     const kind: Key.KeyKind = switch (vk.codepoint) {
         vaxis.Key.left => .left,
         vaxis.Key.right => .right,
@@ -197,16 +197,16 @@ fn from_vaxis_key(vk: vaxis.Key) Key {
     };
 }
 
-fn to_vaxis_style(s: Style) vaxis.Style {
+fn toVaxisStyle(s: Style) vaxis.Style {
     return .{
-        .fg = to_vaxis_color(s.fg),
-        .bg = to_vaxis_color(s.bg),
+        .fg = toVaxisColor(s.fg),
+        .bg = toVaxisColor(s.bg),
         .bold = s.bold,
         .reverse = s.reverse,
     };
 }
 
-fn to_vaxis_color(c: Color) vaxis.Color {
+fn toVaxisColor(c: Color) vaxis.Color {
     return switch (c) {
         .default => .default,
         .rgb => |rgb| .{ .rgb = rgb },
@@ -214,80 +214,80 @@ fn to_vaxis_color(c: Color) vaxis.Color {
     };
 }
 
-test "from_vaxis_key: printable char" {
+test "fromVaxisKey: printable char" {
     const vk: vaxis.Key = .{ .codepoint = 'q' };
-    const k = from_vaxis_key(vk);
-    try std.testing.expect(k.is_char('q'));
-    try std.testing.expect(!k.is_ctrl('q'));
-    try std.testing.expect(!k.is_left());
+    const k = fromVaxisKey(vk);
+    try std.testing.expect(k.isChar('q'));
+    try std.testing.expect(!k.isCtrl('q'));
+    try std.testing.expect(!k.isLeft());
 }
 
-test "from_vaxis_key: ctrl+c" {
+test "fromVaxisKey: ctrl+c" {
     const vk: vaxis.Key = .{ .codepoint = 'c', .mods = .{ .ctrl = true } };
-    const k = from_vaxis_key(vk);
-    try std.testing.expect(k.is_ctrl('c'));
-    try std.testing.expect(!k.is_char('c'));
+    const k = fromVaxisKey(vk);
+    try std.testing.expect(k.isCtrl('c'));
+    try std.testing.expect(!k.isChar('c'));
 }
 
-test "from_vaxis_key: arrow keys" {
-    try std.testing.expectEqual(Key.KeyKind.left, from_vaxis_key(.{ .codepoint = vaxis.Key.left }).kind);
-    try std.testing.expectEqual(Key.KeyKind.right, from_vaxis_key(.{ .codepoint = vaxis.Key.right }).kind);
-    try std.testing.expectEqual(Key.KeyKind.up, from_vaxis_key(.{ .codepoint = vaxis.Key.up }).kind);
-    try std.testing.expectEqual(Key.KeyKind.down, from_vaxis_key(.{ .codepoint = vaxis.Key.down }).kind);
+test "fromVaxisKey: arrow keys" {
+    try std.testing.expectEqual(Key.KeyKind.left, fromVaxisKey(.{ .codepoint = vaxis.Key.left }).kind);
+    try std.testing.expectEqual(Key.KeyKind.right, fromVaxisKey(.{ .codepoint = vaxis.Key.right }).kind);
+    try std.testing.expectEqual(Key.KeyKind.up, fromVaxisKey(.{ .codepoint = vaxis.Key.up }).kind);
+    try std.testing.expectEqual(Key.KeyKind.down, fromVaxisKey(.{ .codepoint = vaxis.Key.down }).kind);
 }
 
-test "from_vaxis_key: tab" {
-    const k = from_vaxis_key(.{ .codepoint = vaxis.Key.tab });
-    try std.testing.expect(k.is_tab());
+test "fromVaxisKey: tab" {
+    const k = fromVaxisKey(.{ .codepoint = vaxis.Key.tab });
+    try std.testing.expect(k.isTab());
 }
 
-test "from_vaxis_key: enter" {
-    const k = from_vaxis_key(.{ .codepoint = vaxis.Key.enter });
-    try std.testing.expect(k.is_enter());
+test "fromVaxisKey: enter" {
+    const k = fromVaxisKey(.{ .codepoint = vaxis.Key.enter });
+    try std.testing.expect(k.isEnter());
 }
 
-test "from_vaxis_key: escape" {
-    const k = from_vaxis_key(.{ .codepoint = vaxis.Key.escape });
-    try std.testing.expect(k.is_escape());
+test "fromVaxisKey: escape" {
+    const k = fromVaxisKey(.{ .codepoint = vaxis.Key.escape });
+    try std.testing.expect(k.isEscape());
 }
 
-test "from_vaxis_key: unknown key" {
-    const k = from_vaxis_key(.{ .codepoint = 99999 });
+test "fromVaxisKey: unknown key" {
+    const k = fromVaxisKey(.{ .codepoint = 99999 });
     try std.testing.expectEqual(Key.KeyKind.unknown, k.kind);
 }
 
-test "to_vaxis_color: default" {
-    const c = to_vaxis_color(.default);
+test "toVaxisColor: default" {
+    const c = toVaxisColor(.default);
     try std.testing.expectEqual(vaxis.Color.default, c);
 }
 
-test "to_vaxis_color: rgb" {
-    const c = to_vaxis_color(.{ .rgb = .{ 255, 0, 128 } });
+test "toVaxisColor: rgb" {
+    const c = toVaxisColor(.{ .rgb = .{ 255, 0, 128 } });
     try std.testing.expect(vaxis.Color.eql(c, .{ .rgb = .{ 255, 0, 128 } }));
 }
 
-test "to_vaxis_color: index" {
-    const c = to_vaxis_color(.{ .index = 2 });
+test "toVaxisColor: index" {
+    const c = toVaxisColor(.{ .index = 2 });
     try std.testing.expect(vaxis.Color.eql(c, .{ .index = 2 }));
 }
 
-test "to_vaxis_style: full round trip" {
+test "toVaxisStyle: full round trip" {
     const our: Style = .{
         .fg = .{ .rgb = .{ 100, 180, 255 } },
         .bg = .{ .index = 4 },
         .bold = true,
         .reverse = true,
     };
-    const vs = to_vaxis_style(our);
+    const vs = toVaxisStyle(our);
     try std.testing.expect(vs.bold);
     try std.testing.expect(vs.reverse);
     try std.testing.expect(vaxis.Color.eql(vs.fg, .{ .rgb = .{ 100, 180, 255 } }));
     try std.testing.expect(vaxis.Color.eql(vs.bg, .{ .index = 4 }));
 }
 
-test "to_vaxis_style: default style" {
+test "toVaxisStyle: default style" {
     const our: Style = .{};
-    const vs = to_vaxis_style(our);
+    const vs = toVaxisStyle(our);
     try std.testing.expect(!vs.bold);
     try std.testing.expect(!vs.reverse);
     try std.testing.expectEqual(vaxis.Color.default, vs.fg);

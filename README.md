@@ -28,13 +28,16 @@ Zig 0.16.0. [libvaxis] fetched automatically.
 | n / N        | Cycle own buildings            |
 | G            | Gather at cursor               |
 | Shift+G      | Auto-find nearest resource (W/D/F) |
-| C            | Jump to coordinate             |
+| c            | Jump to coordinate             |
 | M            | Move selected unit(s)          |
 | T            | Train worker at TC             |
 | W            | Select idle workers            |
 | R            | Resow fallow farm (selected/cursor) |
 | Shift+dir    | Add unit to selection          |
+| ?            | Toggle help overlay            |
 | Q / Ctrl-C   | Quit                           |
+
+The `?` overlay lists every key. It does not pause the game.
 
 ## Costs
 
@@ -81,7 +84,23 @@ for map generation. Workers keep gathering until you tell them to stop.
 Units regenerate 1 HP per 30 ticks (3 seconds), pausing for 5 ticks
 after taking damage.
 
+## Layout
+
+```
+src/
+  main.zig, config.zig
+  lib/       generic infra (time, fmt, coords, color, pathfinding, spatial, terminal)
+  ui/        board, header, footer, color, input
+  game/      state, tick, economy, spawning, selection, queries, movement, map, mapgen
+  units/     unit, worker, soldier
+  buildings/ building, town_center, house, barracks, farm, drop_pile
+  resources/ resource, wildlife, deer, tree
+```
+Generic algorithms (A/*, entity-by-pos queries, color math, 2D
+coords) live in `lib/` with no game knowledge. Game logic calls them
+directly. See [AGENTS.md](AGENTS.md) for conventions and
+[DESIGN.md](DESIGN.md) for the model. Details: [roadmap.md](roadmap.md).
+
 ## Status
 
 Milestone 3 (economy) shipped. Working on buildings (milestone 4).
-See [roadmap.md](roadmap.md) for details.

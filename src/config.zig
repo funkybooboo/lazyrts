@@ -19,7 +19,7 @@ pub const Config = struct {
         deer_hunt_radius: usize = 12,
         grove_scan_radius: usize = 8,
         resow_wood_cost: u32 = 60,
-        depot_adjacent: bool = true,
+        dropoff_adjacent: bool = true,
     } = .{},
 
     selection: struct {
@@ -63,8 +63,6 @@ pub const Config = struct {
         w_label: []const u8 = " W:",
         s_label: []const u8 = " S:",
         coord_help: []const u8 = "Enter=goto Esc=cancel",
-        gather_help: []const u8 = "W=wood D=deer F=farm Esc=cancel",
-        main_help: []const u8 = "hjkl=move T=spawn M=move G=gather W=idle Q=quit",
     } = .{},
 
     map_dims: struct {
@@ -79,14 +77,14 @@ pub const Config = struct {
         max_path: usize = 256,
         max_units: usize = 128,
         max_buildings: usize = 32,
-        max_nature: usize = 256,
+        max_wildlife: usize = 256,
         max_blocked: usize = 256,
     } = .{},
     unit_hp: struct {
         worker: u16 = 50,
         soldier: u16 = 100,
     } = .{},
-    nature_hp: struct {
+    wildlife_hp: struct {
         deer: u16 = 25,
     } = .{},
 
@@ -186,7 +184,7 @@ pub const Config = struct {
         tile_tree_depleted: [3]u8 = .{ 110, 210, 110 },
         tile_water: [3]u8 = .{ 40, 90, 180 },
 
-        nature_deer_depleted: [3]u8 = .{ 210, 175, 120 },
+        wildlife_deer_depleted: [3]u8 = .{ 210, 175, 120 },
         farm_food_depleted: [3]u8 = .{ 170, 220, 220 },
 
         player_unit_full: [3]u8 = .{ 0, 200, 200 },

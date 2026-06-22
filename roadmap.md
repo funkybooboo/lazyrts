@@ -1,6 +1,6 @@
 # lazyrts roadmap
 
-Version: 0.1.0-alpha.1
+Version: 0.1.0-alpha.2
 
 ## Milestones
 
@@ -17,7 +17,7 @@ Map renders, cursor moves, Q quits.
 - [x] Terminal restored on exit (alt screen, raw mode cleanup)
 - [x] vaxis event loop: key_press and winsize handled
 - [x] Unit tests: map.at bounds, map init, cursor clamping, Tile.glyph round-trip
-- [x] Module layout matches spec: main, game, map, input, render
+- [x] Module tree: main, config, lib/ (generic infra), ui/ (render+input), game/ (loop+world), units/ + buildings/ + resources/ (entity dirs, tagged-union variants). See AGENTS.md.
 
 **Ships:** `zig build run` shows a map you can move around. Nothing else.
 
@@ -34,11 +34,11 @@ Place TC, spawn worker, walk to commanded tile via A\*.
 - [x] M key: move selected worker to cursor via A\* pathfinding
 - [x] Worker moves one tile per tick, follows path
 - [x] Fixed 10 Hz logic tick, decoupled from render
-- [x] A\* implemented in pathfinding.zig, tested on known grids
+- [x] A\* implemented (now in `lib/pathfinding.zig`, generic over a `Grid` type), tested on known grids
 - [x] Unit tests: pathfinding finds shortest path, handles obstacles, unreachable tile
-- [x] Map fills full terminal width (row labels removed, coords shown in drawer)
+- [x] Map fills full terminal width (row labels removed, coords shown in footer)
 - [x] Column headers remain at top for horizontal reference
-- [x] Bottom info drawer: tile info, selected unit, resources, stats, cheat sheet
+- [x] Bottom info footer: tile info, selected unit, resources, stats (keybindings moved to the `?` help overlay)
 - [x] Coordinate labels (column headers + row numbers) and J-key cursor jump
 - [x] Owner colors: player=blue, enemy=red for all units and buildings
 - [x] Cluster-based map generator with forests, lakes, BFS path verification
@@ -47,7 +47,7 @@ Place TC, spawn worker, walk to commanded tile via A\*.
 - [x] Starting workers: 2 per side at game start
 - [x] Deer wander randomly, not controllable
 
-**Ships:** Full-screen map with coordinate grid, bottom drawer, colored teams, cluster terrain, deer, starting workers. J+A5 jumps cursor.
+**Ships:** Full-screen map with coordinate grid, bottom footer, colored teams, cluster terrain, deer, starting workers. J+A5 jumps cursor.
 
 ---
 
@@ -69,9 +69,9 @@ Workers gather resources persistently, drop off at TC or Drop Pile, counters inc
 - [x] W key: select all idle workers
 - [x] n / N keys: cycle through player buildings (Shift+Tab reclaimed for back-cycle units)
 - [x] Multiselect: Shift+direction adds units to selection
-- [x] Resource counters (food, wood) displayed in drawer
-- [x] Population / pop cap displayed in drawer
-- [x] Drawer expands to show selected group info (unit count, types)
+- [x] Resource counters (food, wood) displayed in footer
+- [x] Population / pop cap displayed in footer
+- [x] Footer expands to show selected group info (unit count, types)
 - [x] Resource depletion shown by tile color (tree/deer/farm lighten as drained, disappear when empty)
 - [x] Unit tests: resource arithmetic, drop-off logic, persistent gather state, grove depletion, farm depletion/resow, drop pile routing
 
@@ -101,7 +101,7 @@ Build House, Farm, Barracks, Drop Pile. Workers construct and repair persistentl
 - [ ] Construction: worker builds, keeps building while buildings need construction or until told to stop
 - [ ] E key: repair selected damaged building (costs 1/2 original wood cost to fully repair)
 - [ ] Buildings have HP, displayed when selected
-- [ ] Buildings have build progress shown in drawer when selected
+- [ ] Buildings have build progress shown in footer when selected
 - [ ] Unit tests: pop cap arithmetic, building placement validation, construction progress, repair cost
 
 **Ships:** You can build houses, farms, drop piles, and barracks. Workers construct and repair persistently. The economy has two resources now.
@@ -134,7 +134,7 @@ Train Soldier from Barracks. Selection controls for combat units.
 - [ ] F key: select all idle fighters
 - [ ] Shift+F: select all fighters (idle or not)
 - [ ] Shift+W: select all workers (idle or not)
-- [ ] Drawer shows training queue and progress for selected barracks
+- [ ] Footer shows training queue and progress for selected barracks
 - [ ] Unit tests: cost deduction, training queue, unit type distinctions
 
 **Ships:** You can train soldiers from barracks. Fighter and worker selection shortcuts work. The military layer exists.

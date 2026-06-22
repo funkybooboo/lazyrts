@@ -82,7 +82,7 @@ per call, freed on return).
 
 One glyph per tile. Map fills terminal edge-to-edge. Top rows are
 column headers (2-3 rows for wider maps). No row labels — coordinates
-in the drawer.
+in the footer.
 
 | Glyph | Thing      |
 |-------|------------|
@@ -113,12 +113,15 @@ cursor get owner-color background.
 ----------------------------------------------------------
  Tile:Grass D14  Sel:Worker HP:50/50 gathering_wood
  Pop:2/5 W:2 S:0  Wood:340  Food:120             00:35
- G=gather M=move Tab=select W=idle_w Q=quit
+ ?=help
 ----------------------------------------------------------
 ```
 
-Bottom 5 rows: info drawer (tile, selection, resources, hotkeys).
-Expands for build/training queues.
+Bottom rows: info footer (tile, selection, resources, current-mode
+hint). The footer no longer carries a keybinding cheat sheet; press
+`?` for a centered overlay that lists every key. The overlay is
+non-modal — game keeps running while it's open. Footer expands for
+build/training queues (milestone 4+).
 
 ## Risks
 
@@ -133,6 +136,27 @@ Expands for build/training queues.
 - **Grapheme rendering:** vaxis stores `[]const u8` slices, not
   copies. Stack temporaries get invalidated. Fixed with comptime
   ASCII lookup table.
+
+## Module layout
+
+```
+src/
+  main.zig, config.zig
+  lib/       generic infra (time, fmt, coords, color, pathfinding, spatial, terminal)
+  ui/        board, header, footer, color, input
+  game/      state, tick, economy, spawning, selection, queries, movement, map, mapgen
+  units/     unit, worker, soldier
+  buildings/ building, town_center, house, barracks, farm, drop_pile
+  resources/ resource, wildlife, deer, tree
+```
+
+**Principle:** anything reusable, no game knowledge, lives in `lib/`.
+Game code calls `lib/` directly — no pass-through wrappers, no
+re-export facades. Entity types use tagged-union variants (one file
+per concrete type owns its data + behavior); adding a new unit/
+building/resource = new file + one variant arm + switch arms in the
+kind's dispatch methods. See [AGENTS.md](AGENTS.md) for the
+convention and per-file responsibilities.
 
 ## Non-goals
 
