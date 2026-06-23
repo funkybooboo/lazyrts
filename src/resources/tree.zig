@@ -11,7 +11,8 @@ pub fn totalYield(cfg: *const config.Config) u16 {
 }
 
 pub fn yieldPerHarvest(cfg: *const config.Config) u16 {
-    return cfg.economy.tree_yield;
+    _ = cfg;
+    return 1;
 }
 
 pub fn isAt(m: *const game_map.GameMap, x: usize, y: usize) bool {

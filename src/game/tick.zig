@@ -7,6 +7,7 @@ const wildlife = @import("../resources/wildlife.zig");
 const queries = @import("queries.zig");
 const astar = @import("../lib/pathfinding.zig");
 const economy = @import("economy.zig");
+const training = @import("training.zig");
 const config = @import("../config.zig");
 
 const State = state.State;
@@ -59,6 +60,28 @@ pub fn tick(s: *State) void {
     for (0..s.wildlife_count) |i| {
         s.wildlife[i].wander(&s.world, s.spatialCtx(), s.tick_count, i, s.cfg);
     }
+
+    var wi: usize = 0;
+    while (wi < s.wildlife_count) {
+        const n = &s.wildlife[wi];
+        if (n.deer.dead and n.deer.food_remaining > 0) {
+            const tick_ms: u32 = @intCast(s.cfg.timing.tick_period_ns / 1_000_000);
+            n.deer.rot_accum_ms += tick_ms;
+            const rot_interval_ms: u32 = 1000 / s.cfg.economy.deer_rot_rate;
+            while (n.deer.rot_accum_ms >= rot_interval_ms) {
+                n.deer.rot_accum_ms -= rot_interval_ms;
+                if (n.deer.food_remaining > 0) {
+                    n.deer.food_remaining -= 1;
+                }
+            }
+        }
+        if (n.deer.dead and n.deer.food_remaining == 0) {
+            economy.removeDeer(s, wi);
+        } else {
+            wi += 1;
+        }
+    }
+    training.tickQueues(s);
 }
 
 test "tick moves unit along path" {

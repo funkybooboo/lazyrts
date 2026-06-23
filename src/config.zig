@@ -5,18 +5,24 @@ pub const Config = struct {
     starting_food: u32 = 0,
     starting_wood: u32 = 0,
 
+    training: struct {
+        worker_ticks: u32 = 200,
+        soldier_ticks: u32 = 300,
+        worker_food_cost: u32 = 0,
+        soldier_food_cost: u32 = 40,
+        soldier_wood_cost: u32 = 20,
+    } = .{},
+
     economy: struct {
-        tree_yield: u16 = 10,
-        deer_yield: u16 = 10,
         tree_total_yield: u16 = 100,
         deer_total_yield: u16 = 100,
         farm_yield_total: u16 = 250,
-        farm_harvest_per_trip: u16 = 10,
-        carry_capacity: u16 = 100,
-        chop_ticks: u16 = 10,
-        hunt_ticks: u16 = 8,
-        farm_harvest_ticks: u16 = 6,
+        carry_capacity: u16 = 10,
+        wood_gather_rate: u32 = 2,
+        food_gather_rate: u32 = 3,
+        farm_gather_rate: u32 = 4,
         deer_hunt_radius: usize = 12,
+        deer_rot_rate: u32 = 1,
         grove_scan_radius: usize = 8,
         resow_wood_cost: u32 = 60,
         dropoff_adjacent: bool = true,
@@ -30,6 +36,7 @@ pub const Config = struct {
         worker: []const u8 = "w",
         soldier: []const u8 = "s",
         deer: []const u8 = "d",
+        dead_deer: []const u8 = "x",
         town_center: []const u8 = "C",
         house: []const u8 = "H",
         barracks: []const u8 = "B",
@@ -156,6 +163,7 @@ pub const Config = struct {
         right_panel_offset: u16 = 20,
         coord_input_offset: u16 = 22,
         seconds_per_minute: usize = 60,
+        notif_lifetime: usize = 50,
     } = .{},
     timing: struct {
         tick_period_ns: u64 = 100_000_000,
@@ -205,6 +213,10 @@ pub const Config = struct {
         neutral_full: [3]u8 = .{ 140, 95, 35 },
         neutral_damaged: [3]u8 = .{ 220, 185, 140 },
         neutral_unbuilt: [3]u8 = .{ 255, 230, 100 },
+
+        notif_info: [3]u8 = .{ 180, 180, 180 },
+        notif_good: [3]u8 = .{ 100, 220, 100 },
+        notif_bad: [3]u8 = .{ 220, 100, 100 },
     } = .{},
 };
 

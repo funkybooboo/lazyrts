@@ -14,7 +14,24 @@ const selection = @import("selection.zig");
 const spawning = @import("spawning.zig");
 const tick_mod = @import("tick.zig");
 
+const training = @import("training.zig");
+
 pub const MAX_SELECT: usize = selection.MAX_SELECT;
+
+pub const NotifSeverity = enum { info, good, bad };
+
+pub const MAX_NOTIFS: usize = 8;
+
+pub const Notification = struct {
+    text: [48]u8 = @splat(0),
+    len: usize = 0,
+    tick: usize = 0,
+    severity: NotifSeverity = .info,
+
+    pub fn slice(self: *const Notification) []const u8 {
+        return self.text[0..self.len];
+    }
+};
 
 pub const State = struct {
     allocator: std.mem.Allocator,
@@ -38,7 +55,12 @@ pub const State = struct {
     coord_len: usize = 0,
     gather_mode: bool = false,
     help_mode: bool = false,
+    notifications: [MAX_NOTIFS]Notification = [_]Notification{.{}} ** MAX_NOTIFS,
+    notif_head: usize = 0,
+    notif_count: usize = 0,
     tick_count: usize = 0,
+    training_queues: [training.MAX_QUEUES]training.Queue = [_]training.Queue{.{ .building_idx = 0 }} ** training.MAX_QUEUES,
+    training_queue_count: usize = 0,
     cfg: *const config.Config,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64, term_w: u16, term_h: u16, cfg: *const config.Config) !State {

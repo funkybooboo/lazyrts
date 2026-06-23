@@ -5,7 +5,7 @@ const unit = @import("../units/unit.zig");
 const queries = @import("../game/queries.zig");
 const selection = @import("../game/selection.zig");
 const astar = @import("../lib/pathfinding.zig");
-const spawning = @import("../game/spawning.zig");
+const training = @import("../game/training.zig");
 const coords = @import("../lib/coords.zig");
 const lib_spatial = @import("../lib/spatial.zig");
 const config = @import("../config.zig");
@@ -89,7 +89,9 @@ pub fn handle(s: *State, key: terminal.Key) void {
     } else if (key.isDown() or key.isChar('j')) {
         moveCursor(s, 0, 1);
     } else if (key.isChar('t')) {
-        _ = spawning.spawnWorker(s);
+        trainWorker(s);
+    } else if (key.isChar('y')) {
+        trainSoldier(s);
     } else if (key.isChar('m')) {
         moveSelected(s);
     } else if (key.isShiftTab()) {
@@ -123,6 +125,44 @@ fn shiftDir(key: terminal.Key, dx: isize, dy: isize) bool {
     if (dy < 0 and (key.isUp() or key.isChar('K'))) return true;
     if (dy > 0 and (key.isDown() or key.isChar('J'))) return true;
     return false;
+}
+
+pub fn trainWorker(s: *State) void {
+    if (s.selected_building) |bi| {
+        if (bi < s.building_count) {
+            const b = &s.buildings[bi];
+            if (b.kind() == .town_center and b.owner == .player and b.isComplete()) {
+                _ = training.enqueue(s, bi, .worker);
+                return;
+            }
+        }
+    }
+    for (0..s.building_count) |i| {
+        const b = &s.buildings[i];
+        if (b.kind() == .town_center and b.owner == .player and b.isComplete()) {
+            _ = training.enqueue(s, i, .worker);
+            return;
+        }
+    }
+}
+
+pub fn trainSoldier(s: *State) void {
+    if (s.selected_building) |bi| {
+        if (bi < s.building_count) {
+            const b = &s.buildings[bi];
+            if (b.kind() == .barracks and b.owner == .player and b.isComplete()) {
+                _ = training.enqueue(s, bi, .soldier);
+                return;
+            }
+        }
+    }
+    for (0..s.building_count) |i| {
+        const b = &s.buildings[i];
+        if (b.kind() == .barracks and b.owner == .player and b.isComplete()) {
+            _ = training.enqueue(s, i, .soldier);
+            return;
+        }
+    }
 }
 
 fn addUnitAtCursor(s: *State) void {
@@ -264,15 +304,15 @@ test "handle: 'j' moves cursor down" {
     try std.testing.expectEqual(@as(usize, 11), s.cursor_y);
 }
 
-test "handle: 't' spawns worker" {
+test "handle: 't' enqueues worker" {
     const allocator = std.testing.allocator;
     const cfg = config.default();
     var s = try state.State.init(allocator, 42, 80, 45, &cfg);
     defer s.deinit();
-    const initial_count = s.unit_count;
+    const initial_queue_count = s.training_queue_count;
     const key = terminal.Key{ .kind = .char, .char_val = 't' };
     handle(&s, key);
-    try std.testing.expectEqual(initial_count + 1, s.unit_count);
+    try std.testing.expectEqual(initial_queue_count + 1, s.training_queue_count);
 }
 
 test "handle: tab cycles selection forward" {

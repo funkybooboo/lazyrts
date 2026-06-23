@@ -9,6 +9,7 @@ const queries = @import("queries.zig");
 const movement = @import("movement.zig");
 const config = @import("../config.zig");
 const selection = @import("selection.zig");
+const notify = @import("notify.zig");
 
 const State = state.State;
 
@@ -198,6 +199,7 @@ pub fn spawnWildlife(s: *State, kind: wildlife.Kind, x: usize, y: usize) bool {
 
 pub fn spawnUnit(s: *State, kind: unit.UnitKind, owner: unit.Owner, center_x: usize, center_y: usize) bool {
     if (s.unit_count >= s.cfg.entity_limits.max_units) return false;
+    if (owner == .player and state.playerPop(s) >= state.playerPopCap(s)) return false;
 
     const spawn = findSpawn(s, center_x, center_y) orelse return false;
 
@@ -212,14 +214,14 @@ pub fn spawnUnit(s: *State, kind: unit.UnitKind, owner: unit.Owner, center_x: us
     };
     if (owner == .player) {
         selection.selectSingle(s.unitSelection(), s.unit_count);
+        const label = switch (kind) {
+            .worker => s.cfg.labels.worker,
+            .soldier => s.cfg.labels.soldier,
+        };
+        notify.pushUnitTrained(s, label);
     }
     s.unit_count += 1;
     return true;
-}
-
-pub fn spawnWorker(s: *State) bool {
-    const tc = state.playerTc(s) orelse return false;
-    return spawnUnit(s, .worker, .player, tc.x, tc.y);
 }
 
 fn findSpawn(s: *const State, center_x: usize, center_y: usize) ?coords.Pos {
@@ -307,18 +309,6 @@ test "init buildings start complete" {
     for (0..s.building_count) |i| {
         try std.testing.expect(s.buildings[i].isComplete());
     }
-}
-
-test "spawnWorker adds unit and selects it" {
-    const allocator = std.testing.allocator;
-    const cfg = config.default();
-    var s = try state.State.init(allocator, 42, 80, 45, &cfg);
-    defer s.deinit();
-    const before = s.unit_count;
-    try std.testing.expect(spawnWorker(&s));
-    try std.testing.expectEqual(before + 1, s.unit_count);
-    try std.testing.expectEqual(unit.UnitKind.worker, s.units[s.unit_count - 1].kind());
-    try std.testing.expectEqual(unit.Owner.player, s.units[s.unit_count - 1].owner);
 }
 
 test "spawnUnit returns false at capacity" {

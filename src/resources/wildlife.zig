@@ -45,7 +45,12 @@ pub const Wildlife = union(Kind) {
     }
 
     pub fn glyph(self: Wildlife, cfg: *const config.Config) []const u8 {
-        return self.kind().glyph(cfg);
+        return switch (self) {
+            .deer => |d| {
+                if (d.dead) return cfg.glyphs.dead_deer;
+                return deer_mod.glyph(cfg);
+            },
+        };
     }
 
     pub fn maxHp(self: Wildlife, cfg: *const config.Config) u16 {

@@ -16,6 +16,7 @@ pub const Deer = struct {
     state: State = .idle,
     food_remaining: u16 = 0,
     dead: bool = false,
+    rot_accum_ms: u32 = 0,
     herd_cx: usize = 0,
     herd_cy: usize = 0,
     herd_radius: usize = 5,

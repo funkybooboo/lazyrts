@@ -10,6 +10,8 @@ const queries = @import("queries.zig");
 const lib_spatial = @import("../lib/spatial.zig");
 const movement = @import("movement.zig");
 const config = @import("../config.zig");
+const notify = @import("notify.zig");
+const tick = @import("tick.zig");
 
 const Pos = coords.Pos;
 const State = state.State;
@@ -19,6 +21,7 @@ pub const GatherKind = enum { wood, deer, farm };
 fn resetCarry(u: *unit.Unit) void {
     u.carry = 0;
     u.carry_kind = .none;
+    u.gather_accum_ms = 0;
     u.path_len = 0;
     u.path_idx = 0;
 }
@@ -91,7 +94,12 @@ pub fn findNearestTree(s: *const State, from: Pos, radius: usize) ?Pos {
 }
 
 pub fn findNearestDeer(s: *const State, from: Pos, radius: usize) ?usize {
-    return lib_spatial.findIndexNearest(s.wildlife[0..s.wildlife_count], from, radius);
+    const Pred = struct {
+        fn alive(w: wildlife.Wildlife) bool {
+            return !w.isDead();
+        }
+    };
+    return lib_spatial.findIndexNearestWhere(s.wildlife[0..s.wildlife_count], from, radius, Pred.alive);
 }
 
 pub fn findFreeFarm(s: *const State, from: Pos) ?usize {
@@ -110,7 +118,7 @@ pub fn findFreeFarm(s: *const State, from: Pos) ?usize {
     );
 }
 
-fn removeDeer(s: *State, idx: usize) void {
+pub fn removeDeer(s: *State, idx: usize) void {
     if (idx >= s.wildlife_count) return;
     const last = s.wildlife_count - 1;
     if (idx != last) s.wildlife[idx] = s.wildlife[last];
@@ -157,7 +165,7 @@ fn tickWood(s: *State, i: usize) void {
                 }
                 if (movement.isAdjacentTree(&s.world, u, gt)) {
                     u.gather_phase = .harvesting;
-                    u.gather_timer = s.cfg.economy.chop_ticks;
+                    u.gather_accum_ms = 0;
                     u.path_len = 0;
                     u.path_idx = 0;
                     return;
@@ -172,20 +180,28 @@ fn tickWood(s: *State, i: usize) void {
             }
         },
         .harvesting => {
-            if (u.gather_timer > 0) {
-                u.gather_timer -= 1;
-                return;
-            }
             if (u.gather_target) |gt| {
-                if (s.world.at(gt.x, gt.y) == .tree) {
-                    const yld = s.cfg.economy.tree_yield;
-                    s.world.depleteTree(gt.x, gt.y, yld);
-                    u.carry = yld;
+                if (s.world.at(gt.x, gt.y) != .tree) {
+                    u.gather_phase = .to_resource;
+                    return;
+                }
+                const tick_ms: u32 = @intCast(s.cfg.timing.tick_period_ns / 1_000_000);
+                const interval_ms: u32 = 1000 / s.cfg.economy.wood_gather_rate;
+                u.gather_accum_ms += tick_ms;
+                while (u.gather_accum_ms >= interval_ms) {
+                    u.gather_accum_ms -= interval_ms;
+                    if (s.world.at(gt.x, gt.y) != .tree) break;
+                    s.world.depleteTree(gt.x, gt.y, 1);
+                    if (s.world.at(gt.x, gt.y) != .tree) {
+                        notify.pushTreeDepleted(s);
+                    }
+                    u.carry += 1;
                     u.carry_kind = .wood;
+                    if (u.carry >= s.cfg.economy.carry_capacity) break;
+                }
+                if (u.carry >= s.cfg.economy.carry_capacity or s.world.at(gt.x, gt.y) != .tree) {
                     u.gather_phase = .to_dropoff;
                     _ = beginToDropoff(s, i);
-                } else {
-                    u.gather_phase = .to_resource;
                 }
             }
         },
@@ -196,6 +212,7 @@ fn tickWood(s: *State, i: usize) void {
 fn dropAndContinueWood(s: *State, i: usize) void {
     const u = &s.units[i];
     if (u.carry_kind == .wood and u.carry > 0) {
+        notify.pushWoodDrop(s, u.carry);
         s.wood += u.carry;
         u.carry = 0;
         u.carry_kind = .none;
@@ -236,8 +253,13 @@ fn tickHunt(s: *State, i: usize) void {
             const dpos = s.wildlife[di].pos();
             u.gather_target = dpos;
             if (movement.arrived(u, dpos)) {
+                const n = &s.wildlife[di];
+                if (!n.deer.dead) {
+                    n.deer.dead = true;
+                    notify.pushDeerKilled(s);
+                }
                 u.gather_phase = .harvesting;
-                u.gather_timer = s.cfg.economy.hunt_ticks;
+                u.gather_accum_ms = 0;
                 u.path_len = 0;
                 u.path_idx = 0;
                 return;
@@ -257,28 +279,33 @@ fn tickHunt(s: *State, i: usize) void {
                 u.gather_phase = .to_resource;
                 return;
             }
-            const dpos = s.wildlife[di].pos();
+            const n = &s.wildlife[di];
+            const dpos = n.pos();
             if (!movement.arrived(u, dpos)) {
                 u.gather_phase = .to_resource;
                 return;
             }
-            if (u.gather_timer > 0) {
-                u.gather_timer -= 1;
-                return;
+            const tick_ms: u32 = @intCast(s.cfg.timing.tick_period_ns / 1_000_000);
+            const interval_ms: u32 = 1000 / s.cfg.economy.food_gather_rate;
+            u.gather_accum_ms += tick_ms;
+            var carcass_done = false;
+            while (u.gather_accum_ms >= interval_ms) {
+                u.gather_accum_ms -= interval_ms;
+                if (n.deer.food_remaining == 0) {
+                    removeDeer(s, di);
+                    u.target_deer_idx = null;
+                    carcass_done = true;
+                    break;
+                }
+                n.deer.food_remaining -= 1;
+                u.carry += 1;
+                u.carry_kind = .food;
+                if (u.carry >= s.cfg.economy.carry_capacity) break;
             }
-            const yld = s.cfg.economy.deer_yield;
-            const n = &s.wildlife[di];
-            n.deer.dead = true;
-            if (n.deer.food_remaining <= yld) {
-                removeDeer(s, di);
-                u.target_deer_idx = null;
-            } else {
-                n.deer.food_remaining -= yld;
+            if (carcass_done or u.carry >= s.cfg.economy.carry_capacity) {
+                u.gather_phase = .to_dropoff;
+                _ = beginToDropoff(s, i);
             }
-            u.carry = yld;
-            u.carry_kind = .food;
-            u.gather_phase = .to_dropoff;
-            _ = beginToDropoff(s, i);
         },
         .to_dropoff => routeDropoff(s, i, dropAndContinueHunt),
     }
@@ -293,9 +320,17 @@ fn pathHeadsTo(u: *const unit.Unit, target: Pos) bool {
 fn dropAndContinueHunt(s: *State, i: usize) void {
     const u = &s.units[i];
     if (u.carry_kind == .food and u.carry > 0) {
+        notify.pushFoodDrop(s, u.carry);
         s.food += u.carry;
         u.carry = 0;
         u.carry_kind = .none;
+    }
+    if (u.target_deer_idx) |di| {
+        if (di < s.wildlife_count and s.wildlife[di].kind() == .deer and s.wildlife[di].deer.food_remaining > 0) {
+            u.gather_phase = .to_resource;
+            return;
+        }
+        u.target_deer_idx = null;
     }
     const hunt_origin = u.gather_target orelse u.pos();
     if (findNearestDeer(s, hunt_origin, s.cfg.economy.deer_hunt_radius)) |di| {
@@ -330,7 +365,7 @@ fn tickFarm(s: *State, i: usize) void {
                 if (b.variant.farm.fallow or b.variant.farm.food_remaining == 0) {
                     if (autoResow(s, fi)) {
                         u.gather_phase = .harvesting;
-                        u.gather_timer = s.cfg.economy.farm_harvest_ticks;
+                        u.gather_accum_ms = 0;
                         u.path_len = 0;
                         u.path_idx = 0;
                         return;
@@ -342,7 +377,7 @@ fn tickFarm(s: *State, i: usize) void {
                     return;
                 }
                 u.gather_phase = .harvesting;
-                u.gather_timer = s.cfg.economy.farm_harvest_ticks;
+                u.gather_accum_ms = 0;
                 u.path_len = 0;
                 u.path_idx = 0;
                 return;
@@ -353,22 +388,33 @@ fn tickFarm(s: *State, i: usize) void {
         .harvesting => {
             const b = &s.buildings[fi];
             if (b.variant.farm.fallow or b.variant.farm.food_remaining == 0) {
-                u.gather_timer = s.cfg.economy.farm_harvest_ticks;
+                b.variant.farm.assigned_worker = null;
+                u.state = .idle;
+                u.gather_phase = .none;
+                u.target_farm_idx = null;
                 return;
             }
-            if (u.gather_timer > 0) {
-                u.gather_timer -= 1;
-                return;
+            const tick_ms: u32 = @intCast(s.cfg.timing.tick_period_ns / 1_000_000);
+            const interval_ms: u32 = 1000 / s.cfg.economy.farm_gather_rate;
+            u.gather_accum_ms += tick_ms;
+            while (u.gather_accum_ms >= interval_ms) {
+                u.gather_accum_ms -= interval_ms;
+                if (b.variant.farm.food_remaining == 0) break;
+                b.variant.farm.food_remaining -= 1;
+                u.carry += 1;
+                u.carry_kind = .food;
+                if (u.carry >= s.cfg.economy.carry_capacity) break;
             }
-            const take = @min(b.variant.farm.food_remaining, s.cfg.economy.farm_harvest_per_trip);
-            b.variant.farm.food_remaining -= take;
-            u.carry = take;
-            u.carry_kind = .food;
-            if (b.variant.farm.food_remaining == 0) b.variant.farm.fallow = true;
-            u.gather_phase = .to_dropoff;
-            if (findNearestDropoff(s, u.pos())) |di| {
-                u.dest = .{ .x = s.buildings[di].x, .y = s.buildings[di].y };
-                _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, .{ .x = s.buildings[di].x, .y = s.buildings[di].y }, u.pos());
+            if (b.variant.farm.food_remaining == 0) {
+                b.variant.farm.fallow = true;
+                notify.pushFarmDepleted(s);
+            }
+            if (u.carry >= s.cfg.economy.carry_capacity or b.variant.farm.food_remaining == 0) {
+                u.gather_phase = .to_dropoff;
+                if (findNearestDropoff(s, u.pos())) |di| {
+                    u.dest = .{ .x = s.buildings[di].x, .y = s.buildings[di].y };
+                    _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, .{ .x = s.buildings[di].x, .y = s.buildings[di].y }, u.pos());
+                }
             }
         },
         .to_dropoff => routeDropoff(s, i, dropAndContinueFarm),
@@ -378,6 +424,7 @@ fn tickFarm(s: *State, i: usize) void {
 fn dropAndContinueFarm(s: *State, i: usize) void {
     const u = &s.units[i];
     if (u.carry_kind == .food and u.carry > 0) {
+        notify.pushFoodDrop(s, u.carry);
         s.food += u.carry;
         u.carry = 0;
         u.carry_kind = .none;
@@ -588,13 +635,12 @@ test "wood gather: harvest depletes tree and sets carry" {
     try std.testing.expect(startGatherAt(&s, 0, spot.tree));
     tickUnit(&s, 0);
     try std.testing.expectEqual(unit.GatherPhase.harvesting, s.units[0].gather_phase);
-    const chop = s.cfg.economy.chop_ticks;
-    for (0..chop + 2) |_| tickUnit(&s, 0);
-    try std.testing.expectEqual(@as(u16, s.cfg.economy.tree_total_yield - s.cfg.economy.tree_yield), s.world.treeRemainingAt(spot.tree.x, spot.tree.y));
-    try std.testing.expectEqual(@as(map.Tile, .tree), s.world.at(spot.tree.x, spot.tree.y));
-    try std.testing.expectEqual(s.cfg.economy.tree_yield, s.units[0].carry);
+    const ticks_to_fill = @as(usize, @intCast(@divFloor(1000, cfg.economy.wood_gather_rate) * cfg.economy.carry_capacity / @as(u32, @intCast(cfg.timing.tick_period_ns / 1_000_000))));
+    for (0..ticks_to_fill + 5) |_| tickUnit(&s, 0);
+    try std.testing.expectEqual(@as(u16, cfg.economy.carry_capacity), s.units[0].carry);
     try std.testing.expectEqual(unit.CargoKind.wood, s.units[0].carry_kind);
     try std.testing.expectEqual(unit.GatherPhase.to_dropoff, s.units[0].gather_phase);
+    try std.testing.expectEqual(@as(u16, cfg.economy.tree_total_yield - cfg.economy.carry_capacity), s.world.treeRemainingAt(spot.tree.x, spot.tree.y));
 }
 
 test "wood gather: drop-off increments wood counter" {
@@ -606,8 +652,6 @@ test "wood gather: drop-off increments wood counter" {
     s.units[0].x = spot.stand.x;
     s.units[0].y = spot.stand.y;
     _ = startGatherAt(&s, 0, spot.tree);
-    const chop = s.cfg.economy.chop_ticks;
-    for (0..chop + 2) |_| tickUnit(&s, 0);
     const wood_before = s.wood;
     for (0..600) |_| tickUnit(&s, 0);
     try std.testing.expect(s.wood > wood_before);
@@ -628,7 +672,7 @@ test "tree fully depletes after total/yield trips" {
         s.units[i].path_len = 0;
     }
     _ = startGatherAt(&s, 0, spot.tree);
-    const trips_needed = s.cfg.economy.tree_total_yield / s.cfg.economy.tree_yield;
+    const trips_needed = (s.cfg.economy.tree_total_yield + s.cfg.economy.carry_capacity - 1) / s.cfg.economy.carry_capacity;
     for (0..trips_needed * 200) |_| {
         tickUnit(&s, 0);
         if (s.world.at(spot.tree.x, spot.tree.y) == .grass) break;
@@ -638,7 +682,7 @@ test "tree fully depletes after total/yield trips" {
     try std.testing.expectEqual(@as(u32, s.cfg.economy.tree_total_yield), total_gathered);
 }
 
-test "deer drains over multiple hunts then removed" {
+test "deer dies on contact and carcass harvested over multiple trips" {
     const allocator = std.testing.allocator;
     const cfg = config.default();
     var s = try state.State.init(allocator, 42, 80, 45, &cfg);
@@ -652,12 +696,70 @@ test "deer drains over multiple hunts then removed" {
     s.wildlife[di].deer.y = s.units[0].y;
     try std.testing.expect(startGatherAt(&s, 0, s.wildlife[di].pos()));
     try std.testing.expectEqual(unit.UnitActivity.hunting, s.units[0].state);
-    const trips_needed = s.cfg.economy.deer_total_yield / s.cfg.economy.deer_yield;
+    
+    // Run a few ticks to get to the deer
+    for (0..10) |_| tickUnit(&s, 0);
+    
+    // Deer should be dead immediately on contact
+    try std.testing.expect(s.wildlife[di].deer.dead);
+    
+    const trips_needed = (s.cfg.economy.deer_total_yield + s.cfg.economy.carry_capacity - 1) / s.cfg.economy.carry_capacity;
     for (0..trips_needed * 200) |_| {
         tickUnit(&s, 0);
         if (s.wildlife_count == 0 or s.units[0].state == .idle) break;
     }
     try std.testing.expect(s.food >= s.cfg.economy.deer_total_yield);
+}
+
+test "dead deer carcass rots over time" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try state.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    
+    // Place a dead deer manually
+    s.wildlife[0] = .{ .deer = .{
+        .x = 10,
+        .y = 10,
+        .hp = 25,
+        .dead = true,
+        .food_remaining = 50,
+        .rot_accum_ms = 0,
+    } };
+    s.wildlife_count = 1;
+    
+    const initial_food = s.wildlife[0].deer.food_remaining;
+    
+    // Run tick which includes rot pass
+    // At deer_rot_rate=1/sec and tick_rate=10/sec, food should decrease by 1 every 10 ticks
+    for (0..15) |_| tick.tick(&s);
+    
+    // Food should have decreased due to rot
+    try std.testing.expect(s.wildlife[0].deer.food_remaining < initial_food);
+}
+
+test "carcass removed when food reaches zero" {
+    const allocator = std.testing.allocator;
+    const cfg = config.default();
+    var s = try state.State.init(allocator, 42, 80, 45, &cfg);
+    defer s.deinit();
+    
+    // Place a dead deer with low food
+    s.wildlife[0] = .{ .deer = .{
+        .x = 10,
+        .y = 10,
+        .hp = 25,
+        .dead = true,
+        .food_remaining = 2,
+        .rot_accum_ms = 0,
+    } };
+    s.wildlife_count = 1;
+    
+    // Run enough ticks for food to rot away (2 food at 1/sec = 20 ticks at 10 ticks/sec)
+    for (0..30) |_| tick.tick(&s);
+    
+    // Carcass should be removed
+    try std.testing.expectEqual(@as(usize, 0), s.wildlife_count);
 }
 
 test "farm gather: depletes and goes fallow" {

@@ -7,6 +7,8 @@ const unit = @import("../units/unit.zig");
 const building = @import("../buildings/building.zig");
 const config = @import("../config.zig");
 const fmt = @import("../lib/fmt.zig");
+const notify = @import("../game/notify.zig");
+const training = @import("../game/training.zig");
 
 pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
     const cfg = state.cfg;
@@ -69,6 +71,25 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
             x = put(canvas, x, row2, fmtHp(&hp_buf1, u.hp, u.maxHp(state.cfg)), val);
             x = put(canvas, x, row2, " ", label);
             x = put(canvas, x, row2, stateLabel(u.state), val);
+            
+            // Show gather details
+            if (u.state == .gathering_wood or u.state == .hunting or u.state == .gathering_food) {
+                x = put(canvas, x, row2, " ", label);
+                x = put(canvas, x, row2, phaseLabel(u.gather_phase), dim);
+            }
+            
+            if (u.carry > 0 and u.carry_kind != .none) {
+                x = put(canvas, x, row2, " ", label);
+                var cbuf: [8]u8 = undefined;
+                const clen = fmt.formatUint(cbuf[0..], u.carry);
+                x = put(canvas, x, row2, cbuf[0..clen], cargoColor(u.carry_kind, yellow, brown));
+                x = put(canvas, x, row2, "/", label);
+                var capbuf: [4]u8 = undefined;
+                const caplen = fmt.formatUint(capbuf[0..], state.cfg.economy.carry_capacity);
+                x = put(canvas, x, row2, capbuf[0..caplen], dim);
+                x = put(canvas, x, row2, cargoLabel(u.carry_kind), label);
+            }
+            
             if (state.selected_count > 1) {
                 var gbuf: [8]u8 = undefined;
                 const glen = fmt.formatUint(gbuf[0..], state.selected_count);
@@ -105,8 +126,11 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
                         x = put(canvas, x, row2, " (R)", dim);
                     }
                 }
-                if (f.assigned_worker) |_| {
-                    x = put(canvas, x, row2, " worker", cyan);
+                if (f.assigned_worker) |wi| {
+                    x = put(canvas, x, row2, " W", cyan);
+                    var wibuf: [4]u8 = undefined;
+                    const wilen = fmt.formatUint(wibuf[0..], wi);
+                    x = put(canvas, x, row2, wibuf[0..wilen], cyan);
                 } else if (!f.fallow and f.food_remaining > 0) {
                     x = put(canvas, x, row2, " free", dim);
                 }
@@ -136,6 +160,20 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
         var hp_buf2: [12]u8 = undefined;
         x = put(canvas, x, row2, cfg.ui_text.hp_label, label);
         x = put(canvas, x, row2, fmtHp(&hp_buf2, u.hp, u.maxHp(state.cfg)), val);
+        // Show state for hovered units too
+        x = put(canvas, x, row2, " ", label);
+        x = put(canvas, x, row2, stateLabel(u.state), val);
+        if (u.carry > 0 and u.carry_kind != .none) {
+            x = put(canvas, x, row2, " ", label);
+            var cbuf: [8]u8 = undefined;
+            const clen = fmt.formatUint(cbuf[0..], u.carry);
+            x = put(canvas, x, row2, cbuf[0..clen], cargoColor(u.carry_kind, yellow, brown));
+            x = put(canvas, x, row2, "/", label);
+            var capbuf: [4]u8 = undefined;
+            const caplen = fmt.formatUint(capbuf[0..], state.cfg.economy.carry_capacity);
+            x = put(canvas, x, row2, capbuf[0..caplen], dim);
+            x = put(canvas, x, row2, cargoLabel(u.carry_kind), label);
+        }
     } else if (lib_spatial.indexOfAt((state.spatialCtx()).buildings, state.cursor_x, state.cursor_y)) |bi| {
         const b = &state.buildings[bi];
         x = put(canvas, x, row2, b.label(cfg), val);
@@ -187,10 +225,21 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
         if (state.coord_len > 0) {
             canvas.writeStr(cfg.ui.coord_input_offset, row3, state.coord_buf[0..state.coord_len], yellow);
         }
+    } else if (state.training_queue_count > 0) {
+        drawTrainingQueues(canvas, state, row3, cfg);
     } else if (state.help_mode) {
         canvas.writeStr(1, row3, "?=close", dim);
     } else {
-        canvas.writeStr(1, row3, "?=help", dim);
+        if (notify.latest(state, cfg.ui.notif_lifetime)) |n| {
+            const notif_style: terminal.Style = switch (n.severity) {
+                .info => .{ .fg = .{ .rgb = cfg.colors.notif_info } },
+                .good => .{ .fg = .{ .rgb = cfg.colors.notif_good } },
+                .bad => .{ .fg = .{ .rgb = cfg.colors.notif_bad } },
+            };
+            canvas.writeStr(1, row3, n.slice(), notif_style);
+        } else {
+            canvas.writeStr(1, row3, "?=help", dim);
+        }
     }
 }
 
@@ -218,6 +267,31 @@ fn stateLabel(s: unit.UnitActivity) []const u8 {
     };
 }
 
+fn phaseLabel(p: unit.GatherPhase) []const u8 {
+    return switch (p) {
+        .none => "",
+        .to_resource => "->src",
+        .harvesting => "harvest",
+        .to_dropoff => "->drop",
+    };
+}
+
+fn cargoLabel(c: unit.CargoKind) []const u8 {
+    return switch (c) {
+        .none => "",
+        .wood => " wood",
+        .food => " food",
+    };
+}
+
+fn cargoColor(c: unit.CargoKind, food_color: terminal.Style, wood_color: terminal.Style) terminal.Style {
+    return switch (c) {
+        .none => food_color,
+        .wood => wood_color,
+        .food => food_color,
+    };
+}
+
 fn fmtHp(buf: []u8, hp: usize, maxHp: usize) []const u8 {
     var pos: usize = 0;
     pos += fmt.formatUint(buf[pos..], hp);
@@ -240,4 +314,42 @@ fn ownerLabel(o: unit.Owner) []const u8 {
         .enemy => "Enemy",
         .neutral => "Neutral",
     };
+}
+
+fn drawTrainingQueues(canvas: terminal.Canvas, state: *const state_mod.State, row: u16, cfg: *const config.Config) void {
+    const label: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.drawer_label } };
+    const val: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.drawer_val } };
+    const yellow: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.drawer_yellow } };
+    const cyan: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.drawer_cyan } };
+    const red: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.drawer_red } };
+
+    var x: u16 = 1;
+    x = put(canvas, x, row, "Training:", label);
+
+    for (0..state.training_queue_count) |qi| {
+        const q = &state.training_queues[qi];
+        if (q.count == 0) continue;
+        const b = &state.buildings[q.building_idx];
+        x = put(canvas, x, row, " ", label);
+        x = put(canvas, x, row, b.label(cfg), val);
+        x = put(canvas, x, row, ":", label);
+
+        for (0..q.count) |i| {
+            const kind = q.itemAt(i);
+            const glyph = switch (kind) {
+                .worker => "w",
+                .soldier => "s",
+            };
+            const style = if (i == 0) cyan else if (kind == .soldier) red else cyan;
+            x = put(canvas, x, row, glyph, style);
+        }
+
+        const ticks_remaining = q.active_ticks;
+        const secs_remaining: u32 = @as(u32, @intCast(@as(u64, ticks_remaining) * cfg.timing.tick_period_ns / 1_000_000_000)) + 1;
+        x = put(canvas, x, row, " ", label);
+        var sec_buf: [4]u8 = undefined;
+        const sec_len = fmt.formatUint(sec_buf[0..], secs_remaining);
+        x = put(canvas, x, row, sec_buf[0..sec_len], yellow);
+        x = put(canvas, x, row, "s", yellow);
+    }
 }

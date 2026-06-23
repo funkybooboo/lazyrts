@@ -92,7 +92,8 @@ fn tileStyle(t: map.Tile, x: usize, y: usize, state: *const state_mod.State, cfg
 const help_entries = [_]struct { key: []const u8, desc: []const u8 }{
     .{ .key = "h j k l / arrows", .desc = "move cursor" },
     .{ .key = "Q / Ctrl-C", .desc = "quit" },
-    .{ .key = "T", .desc = "spawn worker at TC" },
+    .{ .key = "T", .desc = "train worker (TC)" },
+    .{ .key = "Y", .desc = "train soldier (barracks)" },
     .{ .key = "M", .desc = "move selected unit to cursor" },
     .{ .key = "Tab / Shift+Tab", .desc = "cycle player units" },
     .{ .key = "n / N", .desc = "cycle player buildings" },

@@ -66,6 +66,8 @@ test {
     _ = @import("lib/spatial.zig");
     _ = @import("game/movement.zig");
     _ = @import("game/tick.zig");
+    _ = @import("game/training.zig");
+    _ = @import("game/notify.zig");
     _ = @import("resources/wildlife.zig");
     _ = @import("resources/deer.zig");
     _ = @import("resources/tree.zig");

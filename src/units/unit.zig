@@ -54,7 +54,7 @@ pub const Unit = struct {
 
     gather_phase: GatherPhase = .none,
     gather_target: ?Pos = null,
-    gather_timer: u16 = 0,
+    gather_accum_ms: u32 = 0,
     carry: u16 = 0,
     carry_kind: CargoKind = .none,
     target_deer_idx: ?usize = null,
