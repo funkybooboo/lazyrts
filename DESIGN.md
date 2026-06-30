@@ -75,8 +75,10 @@ their herd center.
 ## Sim model
 
 10 Hz logic tick, deterministic. Single thread. No heap in hot path.
-Render every frame, capped by frame sleep. A* for pathfinding (heap
-per call, freed on return).
+Render every frame, capped by frame sleep. A* for pathfinding uses a
+persistent scratch buffer set (`pathfinding.Scratch`, owned by State,
+sized once to map w*h) — zero heap allocation per call. The open list
+is a binary min-heap.
 
 ## Rendering
 
@@ -125,8 +127,10 @@ build/training queues (milestone 4+).
 
 ## Risks
 
-- **Pathfinding cost:** A* per unit is fine at 80x40 with tens of
-  units. Switch to flow fields only if perf bites.
+- **Pathfinding cost:** A* per unit uses a persistent scratch + binary
+  min-heap (no per-call alloc, O(log n) pop). Fine at 80x40 with tens
+  of units; the scratch scales linearly with map area. Switch to flow
+  fields only if perf bites (see the `` ` `` perf overlay).
 - **Input latency:** Depends on terminal. vaxis raw mode keeps it
   under ~50ms.
 - **AI debugging:** Reactive AI is harder than scripted. Start with

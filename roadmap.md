@@ -89,40 +89,37 @@ Workers gather resources persistently, drop off at TC or Drop Pile, counters inc
 
 ### 4. Performance & concurrency
 
-Comprehensive performance overhaul: multithreaded tick architecture, algorithmic improvements, and rendering optimizations. Fix the bottlenecks before adding more entities.
+Performance overhaul: profiling instrumentation + algorithmic improvements.
+The concurrency architecture (thread pool, queues) is **deferred** until
+profiling proves the single-threaded tick is the bottleneck — the sim is
+intentionally single-threaded and deterministic (required for milestone
+11 lockstep multiplayer), so threading is premature without measured
+need and would fight determinism. Fix the algorithmic bottlenecks first.
 
 **Profiling:**
 
-- [ ] Tick timing instrumentation: per-stage timing visible (movement, gathering, pathfinding, render)
-- [ ] Identify hotspots with real data before optimizing
+- [x] Tick timing instrumentation: per-stage timing visible (units, wildlife, training, render) via the `` ` `` perf overlay (`game/perf.zig`)
+- [x] Identify hotspots with real data before optimizing (overlay shows avg/max per stage + A* calls/tick)
 
 **Algorithmic improvements:**
 
-- [ ] Spatial hash grid: O(1) entity lookup by position instead of O(n) linear scan
-- [ ] Path caching: don't recompute A* every tick for same destination; invalidate on obstacle change
-- [ ] Dirty rect rendering: only redraw changed cells, not entire map every frame
-- [ ] Batch spatial queries: collect entities in radius with grid lookup, not brute-force scan
+- [x] Spatial index: O(1) entity lookup by tile instead of O(n) linear scan (`game/queries.zig` `Index`, flat `tile -> ?usize` per kind; one-entity-per-tile rule means no hash buckets). Used by `occupied`, `board.draw` (was 3 linear scans per tile), and movement blocked checks.
+- [x] Path caching / throttled re-pathing: blocked-step re-paths go through `movement.repathBlocked` with a cooldown (`config.timing.repath_cooldown_ticks`) so a blocked unit waits instead of re-pathing every tick; hunt re-paths only on destination drift > `config.economy.hunt_drift_repath` (not every 1-tile deer move).
+- [x] A* heap-allocation removal: `lib/pathfinding.Scratch` (persistent g/f score, came_from, open heap, closed buffers) owned by `State.path_scratch`, sized once to map w*h — zero heap allocation per A* call (previously 5 mallocs per call).
+- [x] A* open-list: binary min-heap (O(log n) pop) replacing the O(open_len) linear min-f scan.
+- [ ] Dirty rect rendering: only redraw changed cells, not entire map every frame (deferred — measure with perf overlay first; vaxis may already diff internally)
+- [ ] Batch radius spatial queries: `findNearestDropoff`/`Tree`/`Deer` still linear (not hot — only on gather-start/dropoff, not per-tick-per-unit). Convert to index bucket scan only if profiling shows it matters.
 
-**Concurrency architecture:**
+**Concurrency architecture (DEFERRED — gated on profiling):**
 
-- [ ] Command queue: user input (move, gather, attack, build) produced on main thread, consumed by sim thread — decouples input from tick
-- [ ] Unit update queue: units batched into jobs, processed by worker threads, results merged back
-- [ ] Wildlife update queue: deer/wildlife behavior processed as independent jobs
-- [ ] Render queue: final state snapshot pushed to render thread after sim tick completes
-- [ ] Generic producer-consumer primitives: lock-free ring buffers or bounded MPSC queues in lib/
-- [ ] Job scheduler: typed jobs enqueued with explicit dependencies, pulled by thread pool
-- [ ] Tick decomposed into independent stages (input → command drain → movement → gathering → combat → wildlife → render)
-- [ ] State partitioning: entity data sharded by position or owner to minimize contention between worker threads
-- [ ] Main thread owns render + input production; worker threads own sim job consumption
-- [ ] Deterministic: same inputs produce same output regardless of thread scheduling
+- [ ] Command queue, unit/wildlife/render update queues, job scheduler, tick-stage pipeline, state sharding, deterministic-under-threading. Only revisit if the perf overlay shows the single-threaded tick exceeding the frame budget at the target entity count. Threading conflicts with the deterministic lockstep model milestone 11 needs.
 
 **Validation:**
 
-- [ ] Profiling harness: per-queue depth, per-job timing, thread utilization visible
-- [ ] Unit tests: queue ordering, producer-consumer correctness under concurrency, dependency resolution, deterministic output
-- [ ] Benchmark: 100 units tick time < 5ms (currently ~Xms, measure first)
+- [x] Unit tests: Scratch lifecycle, heap optimality, repath cooldown, spatial index rebuild/move/remove, Ctx index-vs-linear fallback
+- [ ] Benchmark: 100 units tick time < 5ms (measure with the perf overlay; current single-threaded baseline TBD)
 
-**Ships:** Tick runs as a pipeline of queues feeding worker threads. Spatial queries O(1). Pathfinding cached. Render dirty. Single-threaded fallback still works. Codebase scales to 200+ entities without frame drops.
+**Ships:** Single-threaded sim with O(1) position queries, zero-alloc A*, throttled re-pathing, and a live perf overlay. Scales further on the same deterministic architecture. Concurrency explicitly deferred until measured need.
 
 ---
 

@@ -43,7 +43,7 @@ src/
     fmt.zig             formatUint, formatElapsed
     coords.zig         Pos, manhattan, dirs4, parseCoord, colToLetters, headerHeight
     color.zig           lerp, lerpColor, healthRatio, resourceRatio
-    pathfinding.zig     generic A* (findPath, findNearestReachable, hasPath)
+    pathfinding.zig     generic A* (findPath, findNearestReachable, hasPath) + Scratch
     spatial.zig         generic entity-by-pos queries (indexOfAt, collectPositions, findIndexNearest, findIndexNearestWhere)
     terminal.zig        vaxis wrapper (Color/Style/Key/Event/Canvas/Terminal)
   ui/                   all rendering + input
@@ -53,13 +53,14 @@ src/
     footer.zig          bottom info panel
     input.zig           key dispatch + cursor/move commands
   game/                 game loop logic + world data
-    state.zig           State struct + init/deinit + selection ctx accessors
+    state.zig           State struct + init/deinit + selection ctx accessors + spatial_index
     tick.zig            sim step (dispatches units + wildlife)
+    perf.zig            Perf counters (per-stage timing, A* call count)
     economy.zig         gather state machine, resource flow
     spawning.zig        entity spawn (init helpers + runtime spawn)
     selection.zig       selection ops on Ctx/View passed by caller
-    queries.zig         Ctx bundle + occupied (3-way OR) + collectBlocked
-    movement.zig        movement helpers (pathTo, advance, arrived) on lib A*
+    queries.zig         Ctx bundle + Index (O(1) tile->entity) + occupied + collectBlocked
+    movement.zig        movement helpers (pathTo, advance, arrived, repathBlocked) on lib A*
     map.zig             GameMap + Tile (terrain data, no rendering)
     mapgen.zig          terrain generation
   units/                unit entities (data + behavior per type)
@@ -124,8 +125,10 @@ Entry point. Owns the terminal event loop. Dispatches:
 - `resize` -> ignored (terminal handles internally)
 
 Uses `lib.time.Ticker` for tick rate from `config.zig`. Calls
-`ui.map.draw()`. Does not contain game logic. `test` block references
-all modules so `zig build test` discovers their tests.
+`ui.map.draw()`. Does not contain game logic. Wraps render in a
+`perf.renderSection` so frame time is tracked separately from tick
+stages. `test` block references all modules so `zig build test`
+discovers their tests.
 
 ### config.zig
 
@@ -157,7 +160,14 @@ in other projects.
   type duck-typed to expose `width`, `height`,
   `isWalkable(x, y) bool`. Zero-cost (no vtable; compiles to the same
   code as a hardcoded implementation). `Pos` from `coords.zig`.
-  Tests use a self-contained `TestGrid` (no game imports).
+  All three take a `*Scratch` (persistent, reusable buffer set: g/f
+  score, came_from, open heap, closed) instead of an allocator — the
+  hot path does ZERO heap allocation per A* call. The open list is a
+  binary min-heap (O(log n) pop) with lazy deletion of closed nodes.
+  Path reconstruction walks `came_from` backward into `out_path`
+  directly, no temp buffer. `Scratch` is owned by `game.State`
+  (`path_scratch`), sized once to map w*h at init. Tests use a
+  self-contained `TestGrid` (no game imports).
 - `spatial.zig` -- generic entity-by-position queries over any slice
   of items that expose a position (`.x`/`.y` fields OR a `pos()`
   method; comptime duck-typed via `@hasField`/`@hasDecl`). `indexOfAt`,
@@ -195,18 +205,33 @@ Game loop logic + world data.
 
 - `state.zig` -- `State` struct (pure data + `init`/`deinit`/
   `spatialCtx`) + `unitSelection`/`buildingSelection` (mutable) and
-  `selectView`/`buildingView` (const) accessors that produce the
-  small selection contexts. Player helpers (`playerTc`, `playerPop`,
+  `selectView`/`buildingView` (const) accessors that produce the small
+  selection contexts. `spatialCtx()` attaches `&spatial_index` so callers
+  get O(1) position lookups; `rebuildSpatialIndex()` refreshes it (called
+  at tick start and before render). Player helpers (`playerTc`, `playerPop`,
   `playerPopCap`, `playerUnitCounts`, `elapsedSeconds`, `gatherAtCursor`,
   `gatherNearest`, `resowSelected`). No re-export facade.
 - `tick.zig` -- `tick(s)`: advances moving units, gathers, wildlife
-  wander.
+  wander. Wraps each stage in a `perf.section` (units / wildlife /
+  training) and calls `perf.finishTick` at the end.
+- `perf.zig` -- `Perf` counters: per-stage ns over a rolling 64-sample
+  window (tick stages and render tracked in *separate* rings because
+  ticks and frames are not 1:1 — multiple ticks can fire per frame).
+  `Section`/`RenderSection` are no-ops when `perf.enabled` is false so
+  profiling has zero overhead when off. `recordPathfind` counts A*
+  calls per tick. Toggled by the `` ` `` key; overlay drawn in
+  `ui/board.zig`.
 - `economy.zig` -- gather state machine (`tickUnit`), drop-off
   routing (`beginToDropoff`, `routeDropoff`), `startGatherAt`/
   `startGatherNearest`, `tryResow`/`autoResow`/`resowFarm`,
   `findNearestDropoff`/`Tree`/`FreeFarm` (building queries delegate to
   `lib/spatial.findIndexNearest*`; tree uses `findNearestPosWhere`).
-  Helper fns (`resetCarry`, `buildingPos`) dedupe unit-state resets.
+  Helper fns (`resetCarry`, `buildingPos`, `pathDrift`) dedupe unit-state
+  resets / path-staleness checks. Hunt re-pathing is throttled by
+  `config.economy.hunt_drift_repath`: a worker only re-paths to a
+  wandering deer when the path endpoint has drifted more than that many
+  tiles (or the path is exhausted), instead of every tick the deer
+  moves.
 - `spawning.zig` -- `init_starting_buildings`/`workers`/`farm`/
   `allocate_paths`/`spawn_deer` (one-time setup, called from
   `State.init`) + runtime `spawnUnit`/`spawnWorker`/`spawnWildlife`.
@@ -219,16 +244,30 @@ Game loop logic + world data.
   build a ctx via `State.unitSelection()` / `.buildingSelection()`
   (or `.selectView()` / `.buildingView()` for read-only draw paths).
 - `queries.zig` -- `Ctx` (game-specific bundle of unit/building/wildlife
-  slices) + `occupied` (3-way OR across entity kinds) + `collectBlocked`
-  (glues buildings + wildlife + units-with-skip). Callers use
-  `lib/spatial.indexOfAt(ctx.units, x, y)` directly for single-kind
-  position lookups (no kind-named wrappers).
+  slices + optional `*const Index`) + `occupied` (3-way OR across entity
+  kinds) + `collectBlocked` (glues buildings + wildlife + units-with-skip).
+  `Ctx.unitAt`/`buildingAt`/`wildlifeAt` do O(1) tile lookups via the
+  `Index` when present, falling back to `lib/spatial.indexOfAt` (linear)
+  when `index` is null (used in tests / command paths that need fresh
+  positions). `Index` is a flat `tile -> ?usize` array per kind (the game
+  enforces one entity per tile, so no hash buckets): `rebuild`, `moveUnit`,
+  `removeWildlife`, `putUnit`/`putBuilding`/`putWildlife`. Owned by
+  `State.spatial_index`, rebuilt at tick start and before render, kept
+  current incrementally on step (`moveUnit`), spawn (`put*`), and deer
+  removal (`removeWildlife`). Callers needing single-kind linear lookups
+  (e.g. command paths targeting a wandering deer) use
+  `lib/spatial.indexOfAt(slice, x, y)` directly.
 - `movement.zig` -- game-specific movement helpers built on
   `lib/pathfinding.zig`: `adjacentWalkable`, `pathTo`, `pathToAdjacent`,
-  `advance`, `arrived`, `isAdjacentTree`. These know `Unit`,
-  `queries.Ctx`, `collectBlocked`. The generic A* core
+  `advance`, `arrived`, `isAdjacentTree`, `repathBlocked`. These know
+  `Unit`, `queries.Ctx`, `collectBlocked`. The generic A* core
   (`findPath`/`findNearestReachable`/`hasPath`) lives in `lib/`;
   callers needing raw A* import `lib/pathfinding.zig` directly.
+  `repathBlocked` throttles re-pathing when a step is blocked: returns
+  `.wait` if within `config.timing.repath_cooldown_ticks` of the last
+  re-path (lets the blocker move instead of re-pathing every tick),
+  `.ok`/`.fail` otherwise. `advance` and `tick`'s `.moving` case both
+  route blocked re-paths through it.
 - `map.zig` -- `Tile` enum (glyph, isWalkable, label) + `GameMap`
   (tiles, treeRemaining, TC coords, at/isWalkable/set/
   treeRemainingAt/depleteTree/nearTc). Pure data, no rendering
@@ -256,6 +295,7 @@ Removed. Input lives in `ui/input.zig` (see above).
 - r: resow fallow farm (60 wood)
 - Shift+direction: add unit to selection (multiselect)
 - ?: toggle help overlay (game keeps running)
+- `: toggle perf overlay (per-stage tick/render timing, A* calls/tick)
 
 ## Testing Rules
 
