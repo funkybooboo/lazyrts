@@ -152,7 +152,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
             const rlen = fmt.formatUint(rbuf[0..], b.y + 1);
             x = put(canvas, x, row2, rbuf[0..rlen], val);
         }
-    } else if (lib_spatial.indexOfAt((state.spatialCtx()).units, state.cursor_x, state.cursor_y)) |ui| {
+    } else if (state.spatialCtx().unitAt(state.cursor_x, state.cursor_y)) |ui| {
         const u = &state.units[ui];
         x = put(canvas, x, row2, kindLabel(u.kind(), cfg), val);
         x = put(canvas, x, row2, " ", label);
@@ -174,7 +174,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
             x = put(canvas, x, row2, capbuf[0..caplen], dim);
             x = put(canvas, x, row2, cargoLabel(u.carry_kind), label);
         }
-    } else if (lib_spatial.indexOfAt((state.spatialCtx()).buildings, state.cursor_x, state.cursor_y)) |bi| {
+    } else if (state.spatialCtx().buildingAt(state.cursor_x, state.cursor_y)) |bi| {
         const b = &state.buildings[bi];
         x = put(canvas, x, row2, b.label(cfg), val);
         x = put(canvas, x, row2, " ", label);

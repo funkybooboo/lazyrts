@@ -60,6 +60,7 @@ pub const Unit = struct {
     target_deer_idx: ?usize = null,
     target_farm_idx: ?usize = null,
     grove_anchor: ?Pos = null,
+    last_repath_tick: usize = 0,
 
     pub fn pos(self: *const Unit) Pos {
         return .{ .x = self.x, .y = self.y };

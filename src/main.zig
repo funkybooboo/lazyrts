@@ -6,6 +6,7 @@ const render = @import("ui/board.zig");
 const terminal = @import("lib/terminal.zig");
 const time = @import("lib/time.zig");
 const config = @import("config.zig");
+const perf = @import("game/perf.zig");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -42,7 +43,11 @@ pub fn main(init: std.process.Init) !void {
             }
         }
 
+        state.rebuildSpatialIndex();
+        const rsec = perf.renderSection(&state.perf);
         render.draw(t.canvas(), &state);
+        rsec.end();
+        state.perf.finishRender();
         try t.present();
 
         time.sleepNs(cfg.timing.frame_sleep_ns);
@@ -68,6 +73,7 @@ test {
     _ = @import("game/tick.zig");
     _ = @import("game/training.zig");
     _ = @import("game/notify.zig");
+    _ = @import("game/perf.zig");
     _ = @import("resources/wildlife.zig");
     _ = @import("resources/deer.zig");
     _ = @import("resources/tree.zig");

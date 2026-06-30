@@ -35,10 +35,10 @@ pub fn moveSelected(s: *State) void {
         const blocked_slice = if (blocked_count > 0) blocked_buf[0..blocked_count] else null;
 
         var target = goal;
-        const len = astar.findPath(s.allocator, &s.world, start, goal, u.path, blocked_slice) orelse blk: {
-            const nearest = astar.findNearestReachable(s.allocator, &s.world, goal, blocked_slice) orelse continue;
+        const len = astar.findPath(&s.path_scratch, &s.world, start, goal, u.path, blocked_slice) orelse blk: {
+            const nearest = astar.findNearestReachable(&s.path_scratch, &s.world, goal, blocked_slice) orelse continue;
             target = nearest;
-            break :blk astar.findPath(s.allocator, &s.world, start, nearest, u.path, blocked_slice) orelse continue;
+            break :blk astar.findPath(&s.path_scratch, &s.world, start, nearest, u.path, blocked_slice) orelse continue;
         };
         if (len == 0) continue;
         u.path_len = len;
@@ -110,6 +110,8 @@ pub fn handle(s: *State, key: terminal.Key) void {
         selection.selectIdleWorkers(s.unitSelection());
     } else if (key.isChar('r')) {
         _ = state.resowSelected(s);
+    } else if (key.isChar('`')) {
+        s.perf.enabled = !s.perf.enabled;
     } else if (key.isChar('?')) {
         s.help_mode = true;
     } else if (key.isChar('c')) {
@@ -166,7 +168,7 @@ pub fn trainSoldier(s: *State) void {
 }
 
 fn addUnitAtCursor(s: *State) void {
-    if (lib_spatial.indexOfAt((s.spatialCtx()).units, s.cursor_x, s.cursor_y)) |ui| {
+    if (s.spatialCtx().unitAt(s.cursor_x, s.cursor_y)) |ui| {
         selection.selectAdd(s.unitSelection(), ui);
     }
 }

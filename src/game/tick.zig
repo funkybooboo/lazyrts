@@ -4,20 +4,23 @@ const unit = @import("../units/unit.zig");
 const coords = @import("../lib/coords.zig");
 const lib_spatial = @import("../lib/spatial.zig");
 const wildlife = @import("../resources/wildlife.zig");
-const queries = @import("queries.zig");
-const astar = @import("../lib/pathfinding.zig");
 const economy = @import("economy.zig");
+const movement = @import("movement.zig");
 const training = @import("training.zig");
 const config = @import("../config.zig");
+const perf = @import("perf.zig");
 
 const State = state.State;
 
 pub fn tick(s: *State) void {
     s.tick_count += 1;
+    s.perf.resetTick();
+    s.rebuildSpatialIndex();
 
-    var blocked_buf: [256]coords.Pos = undefined;
-
-    for (0..s.unit_count) |i| {
+    {
+        const sec = perf.section(&s.perf, .units);
+        defer sec.end();
+        for (0..s.unit_count) |i| {
         const u = &s.units[i];
         switch (u.state) {
             .moving => {
@@ -25,44 +28,40 @@ pub fn tick(s: *State) void {
                     const next = u.path[u.path_idx];
                     var blocked = false;
                     const ctx = s.spatialCtx();
-                    if (lib_spatial.indexOfAt((ctx).units, next.x, next.y)) |other| {
+                    if (ctx.unitAt(next.x, next.y)) |other| {
                         if (other != i) blocked = true;
                     }
-                    if (lib_spatial.indexOfAt((ctx).buildings, next.x, next.y) != null) blocked = true;
-                    if (lib_spatial.indexOfAt((ctx).wildlife, next.x, next.y) != null) blocked = true;
+                    if (ctx.buildingAt(next.x, next.y) != null) blocked = true;
+                    if (ctx.wildlifeAt(next.x, next.y) != null) blocked = true;
 
                     if (blocked) {
                         if (u.dest) |dest| {
-                            const current = u.pos();
-                            const blocked_count = queries.collectBlocked(ctx, &blocked_buf, i);
-                            const blocked_slice = if (blocked_count > 0) blocked_buf[0..blocked_count] else null;
-
-                            if (astar.findPath(s.allocator, &s.world, current, dest, u.path, blocked_slice)) |new_len| {
-                                if (new_len > 0) {
-                                    u.path_len = new_len;
-                                    u.path_idx = 0;
-                                } else {
-                                    u.state = .idle;
-                                }
-                            } else {
-                                u.state = .idle;
+                            switch (movement.repathBlocked(&s.path_scratch, ctx, &s.world, s.units, i, dest, s.tick_count, s.cfg.timing.repath_cooldown_ticks)) {
+                                .fail => u.state = .idle,
+                                .wait, .ok => {},
                             }
                         }
                         continue;
                     }
                 }
+                const old_pos = u.pos();
                 u.step();
+                s.spatial_index.moveUnit(i, old_pos, u.pos());
             },
             .gathering_wood, .gathering_food, .hunting => economy.tickUnit(s, i),
             else => {},
         }
     }
-    for (0..s.wildlife_count) |i| {
-        s.wildlife[i].wander(&s.world, s.spatialCtx(), s.tick_count, i, s.cfg);
     }
+    {
+        const sec = perf.section(&s.perf, .wildlife);
+        defer sec.end();
+        for (0..s.wildlife_count) |i| {
+            s.wildlife[i].wander(&s.world, s.spatialCtx(), s.tick_count, i, s.cfg);
+        }
 
-    var wi: usize = 0;
-    while (wi < s.wildlife_count) {
+        var wi: usize = 0;
+        while (wi < s.wildlife_count) {
         const n = &s.wildlife[wi];
         if (n.deer.dead and n.deer.food_remaining > 0) {
             const tick_ms: u32 = @intCast(s.cfg.timing.tick_period_ns / 1_000_000);
@@ -80,8 +79,14 @@ pub fn tick(s: *State) void {
         } else {
             wi += 1;
         }
+        }
     }
-    training.tickQueues(s);
+    {
+        const sec = perf.section(&s.perf, .training);
+        defer sec.end();
+        training.tickQueues(s);
+    }
+    s.perf.finishTick();
 }
 
 test "tick moves unit along path" {

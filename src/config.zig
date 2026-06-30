@@ -22,6 +22,7 @@ pub const Config = struct {
         food_gather_rate: u32 = 3,
         farm_gather_rate: u32 = 4,
         deer_hunt_radius: usize = 12,
+        hunt_drift_repath: usize = 3,
         deer_rot_rate: u32 = 1,
         grove_scan_radius: usize = 8,
         resow_wood_cost: u32 = 60,
@@ -169,6 +170,7 @@ pub const Config = struct {
         tick_period_ns: u64 = 100_000_000,
         resize_poll_interval_ns: u64 = 10_000_000,
         frame_sleep_ns: u64 = 1_000_000,
+        repath_cooldown_ticks: usize = 3,
     } = .{},
 
     colors: struct {

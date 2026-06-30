@@ -26,6 +26,7 @@ pub fn initStartingBuildings(s: *State) !void {
             .owner = def.owner,
             .hp = building.maxHp(.town_center, s.cfg),
         };
+        s.spatial_index.putBuilding(i, .{ .x = def.tc_x, .y = def.tc_y });
     }
     s.building_count = starting_buildings.len;
 }
@@ -56,6 +57,7 @@ pub fn placeStartingFarm(s: *State) !void {
             .owner = .player,
             .hp = building.maxHp(.farm, s.cfg),
         };
+        s.spatial_index.putBuilding(s.building_count, .{ .x = ux, .y = uy });
         s.building_count += 1;
         return;
     }
@@ -77,6 +79,7 @@ pub fn initStartingWorkers(s: *State) !void {
             .owner = def.owner,
             .hp = unit.maxHp(.worker, s.cfg),
         };
+        s.spatial_index.putUnit(i, sp);
         s.unit_count = i + 1;
     }
 }
@@ -193,6 +196,7 @@ pub fn spawnWildlife(s: *State, kind: wildlife.Kind, x: usize, y: usize) bool {
             .food_remaining = wildlife.maxFood(kind, s.cfg),
         } },
     };
+    s.spatial_index.putWildlife(s.wildlife_count, .{ .x = x, .y = y });
     s.wildlife_count += 1;
     return true;
 }
@@ -220,6 +224,7 @@ pub fn spawnUnit(s: *State, kind: unit.UnitKind, owner: unit.Owner, center_x: us
         };
         notify.pushUnitTrained(s, label);
     }
+    s.spatial_index.putUnit(s.unit_count, spawn);
     s.unit_count += 1;
     return true;
 }

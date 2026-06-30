@@ -15,7 +15,84 @@ fn idx(width: usize, x: usize, y: usize) usize {
 
 const dirs = coords.dirs4;
 
-pub fn findPath(allocator: std.mem.Allocator, grid: anytype, start: Pos, goal: Pos, out_path: []Pos, blocked: ?[]const Pos) ?usize {
+pub const Scratch = struct {
+    allocator: std.mem.Allocator,
+    g_score: []u32 = &.{},
+    f_score: []u32 = &.{},
+    came_from: []?Pos = &.{},
+    open: []Pos = &.{},
+    closed: []bool = &.{},
+    capacity: usize = 0,
+
+    pub fn init(allocator: std.mem.Allocator, map_size: usize) !Scratch {
+        var s: Scratch = .{ .allocator = allocator };
+        try s.ensure(map_size);
+        return s;
+    }
+
+    pub fn deinit(self: *Scratch) void {
+        if (self.capacity == 0) return;
+        self.allocator.free(self.g_score);
+        self.allocator.free(self.f_score);
+        self.allocator.free(self.came_from);
+        self.allocator.free(self.open);
+        self.allocator.free(self.closed);
+        self.g_score = &.{};
+        self.f_score = &.{};
+        self.came_from = &.{};
+        self.open = &.{};
+        self.closed = &.{};
+        self.capacity = 0;
+    }
+
+    pub fn ensure(self: *Scratch, map_size: usize) !void {
+        if (map_size <= self.capacity) return;
+        self.deinit();
+        self.g_score = try self.allocator.alloc(u32, map_size);
+        self.f_score = try self.allocator.alloc(u32, map_size);
+        self.came_from = try self.allocator.alloc(?Pos, map_size);
+        self.open = try self.allocator.alloc(Pos, map_size);
+        self.closed = try self.allocator.alloc(bool, map_size);
+        self.capacity = map_size;
+    }
+};
+
+fn heapPush(heap: []Pos, len: *usize, f: []const u32, width: usize, pos: Pos) void {
+    var i = len.*;
+    heap[i] = pos;
+    len.* += 1;
+    while (i > 0) {
+        const parent = (i - 1) / 2;
+        if (f[idx(width, heap[i].x, heap[i].y)] < f[idx(width, heap[parent].x, heap[parent].y)]) {
+            const tmp = heap[i];
+            heap[i] = heap[parent];
+            heap[parent] = tmp;
+            i = parent;
+        } else break;
+    }
+}
+
+fn heapPop(heap: []Pos, len: *usize, f: []const u32, width: usize) Pos {
+    const top = heap[0];
+    len.* -= 1;
+    heap[0] = heap[len.*];
+    var i: usize = 0;
+    while (true) {
+        const l = 2 * i + 1;
+        const r = 2 * i + 2;
+        var smallest = i;
+        if (l < len.* and f[idx(width, heap[l].x, heap[l].y)] < f[idx(width, heap[smallest].x, heap[smallest].y)]) smallest = l;
+        if (r < len.* and f[idx(width, heap[r].x, heap[r].y)] < f[idx(width, heap[smallest].x, heap[smallest].y)]) smallest = r;
+        if (smallest == i) break;
+        const tmp = heap[i];
+        heap[i] = heap[smallest];
+        heap[smallest] = tmp;
+        i = smallest;
+    }
+    return top;
+}
+
+pub fn findPath(scratch: *Scratch, grid: anytype, start: Pos, goal: Pos, out_path: []Pos, blocked: ?[]const Pos) ?usize {
     const width = grid.width;
     if (start.x == goal.x and start.y == goal.y) return 0;
     if (!grid.isWalkable(goal.x, goal.y)) return null;
@@ -27,70 +104,53 @@ pub fn findPath(allocator: std.mem.Allocator, grid: anytype, start: Pos, goal: P
     }
 
     const map_size = @as(usize, width) * @as(usize, grid.height);
+    scratch.ensure(map_size) catch return null;
+    const g = scratch.g_score[0..map_size];
+    const f = scratch.f_score[0..map_size];
+    const came = scratch.came_from[0..map_size];
+    const closed = scratch.closed[0..map_size];
+    const heap = scratch.open;
 
-    const g_score = allocator.alloc(u32, map_size) catch return null;
-    defer allocator.free(g_score);
-    const f_score = allocator.alloc(u32, map_size) catch return null;
-    defer allocator.free(f_score);
-    const came_from = allocator.alloc(?Pos, map_size) catch return null;
-    defer allocator.free(came_from);
-    const open = allocator.alloc(Pos, map_size) catch return null;
-    defer allocator.free(open);
-    const closed = allocator.alloc(bool, map_size) catch return null;
-    defer allocator.free(closed);
-
-    @memset(g_score, std.math.maxInt(u32));
-    @memset(f_score, std.math.maxInt(u32));
-    @memset(came_from, @as(?Pos, null));
+    @memset(g, std.math.maxInt(u32));
+    @memset(f, std.math.maxInt(u32));
+    @memset(came, @as(?Pos, null));
     @memset(closed, false);
 
     var open_len: usize = 0;
 
     const si = idx(width, start.x, start.y);
-    g_score[si] = 0;
-    f_score[si] = heuristic(start, goal);
-    open[0] = start;
-    open_len = 1;
+    g[si] = 0;
+    f[si] = heuristic(start, goal);
+    heapPush(heap, &open_len, f, width, start);
 
     while (open_len > 0) {
-        var best_i: usize = 0;
-        var best_f = f_score[idx(width, open[0].x, open[0].y)];
-        for (1..open_len) |i| {
-            const f = f_score[idx(width, open[i].x, open[i].y)];
-            if (f < best_f) {
-                best_f = f;
-                best_i = i;
-            }
-        }
-
-        const current = open[best_i];
+        const current = heapPop(heap, &open_len, f, width);
+        const ci = idx(width, current.x, current.y);
 
         if (current.x == goal.x and current.y == goal.y) {
-            const reconstruct = allocator.alloc(Pos, map_size) catch return null;
-            defer allocator.free(reconstruct);
-            var recon_len: usize = 0;
+            var n: usize = 0;
             var cur = goal;
             while (true) {
-                reconstruct[recon_len] = cur;
-                recon_len += 1;
+                n += 1;
                 if (cur.x == start.x and cur.y == start.y) break;
-                cur = came_from[idx(width, cur.x, cur.y)].?;
+                cur = came[idx(width, cur.x, cur.y)].?;
             }
-            const path_len = recon_len - 1;
+            const path_len = n - 1;
             if (path_len > out_path.len) return null;
-            for (0..path_len) |i| {
-                out_path[i] = reconstruct[recon_len - 2 - i];
+            var ip: usize = path_len;
+            cur = goal;
+            while (ip > 0) {
+                ip -= 1;
+                out_path[ip] = cur;
+                cur = came[idx(width, cur.x, cur.y)].?;
             }
             return path_len;
         }
 
-        open[best_i] = open[open_len - 1];
-        open_len -= 1;
-
-        const ci = idx(width, current.x, current.y);
+        if (closed[ci]) continue;
         closed[ci] = true;
 
-        const cg = g_score[ci];
+        const cg = g[ci];
 
         for (dirs) |d| {
             const next_x = @as(isize, @intCast(current.x)) + d.dx;
@@ -116,12 +176,11 @@ pub fn findPath(allocator: std.mem.Allocator, grid: anytype, start: Pos, goal: P
             if (closed[ni]) continue;
 
             const tentative_g = cg + 1;
-            if (tentative_g < g_score[ni]) {
-                came_from[ni] = current;
-                g_score[ni] = tentative_g;
-                f_score[ni] = tentative_g + heuristic(.{ .x = unit_x, .y = unit_y }, goal);
-                open[open_len] = .{ .x = unit_x, .y = unit_y };
-                open_len += 1;
+            if (tentative_g < g[ni]) {
+                came[ni] = current;
+                g[ni] = tentative_g;
+                f[ni] = tentative_g + heuristic(.{ .x = unit_x, .y = unit_y }, goal);
+                heapPush(heap, &open_len, f, width, .{ .x = unit_x, .y = unit_y });
             }
         }
     }
@@ -129,17 +188,16 @@ pub fn findPath(allocator: std.mem.Allocator, grid: anytype, start: Pos, goal: P
     return null;
 }
 
-pub fn hasPath(allocator: std.mem.Allocator, grid: anytype, start: Pos, goal: Pos) bool {
+pub fn hasPath(scratch: *Scratch, grid: anytype, start: Pos, goal: Pos) bool {
     const width = grid.width;
     if (start.x == goal.x and start.y == goal.y) return true;
     if (!grid.isWalkable(start.x, start.y)) return false;
     if (!grid.isWalkable(goal.x, goal.y)) return false;
 
     const map_size = @as(usize, width) * @as(usize, grid.height);
-    const visited = allocator.alloc(bool, map_size) catch return false;
-    defer allocator.free(visited);
-    const queue = allocator.alloc(Pos, map_size) catch return false;
-    defer allocator.free(queue);
+    scratch.ensure(map_size) catch return false;
+    const visited = scratch.closed[0..map_size];
+    const queue = scratch.open[0..map_size];
 
     @memset(visited, false);
 
@@ -171,13 +229,12 @@ pub fn hasPath(allocator: std.mem.Allocator, grid: anytype, start: Pos, goal: Po
     return false;
 }
 
-pub fn findNearestReachable(allocator: std.mem.Allocator, grid: anytype, goal: Pos, blocked: ?[]const Pos) ?Pos {
+pub fn findNearestReachable(scratch: *Scratch, grid: anytype, goal: Pos, blocked: ?[]const Pos) ?Pos {
     const width = grid.width;
     const map_size = @as(usize, width) * @as(usize, grid.height);
-    const visited = allocator.alloc(bool, map_size) catch return null;
-    defer allocator.free(visited);
-    const queue = allocator.alloc(Pos, map_size) catch return null;
-    defer allocator.free(queue);
+    scratch.ensure(map_size) catch return null;
+    const visited = scratch.closed[0..map_size];
+    const queue = scratch.open[0..map_size];
 
     @memset(visited, false);
 
@@ -202,9 +259,7 @@ pub fn findNearestReachable(allocator: std.mem.Allocator, grid: anytype, goal: P
                     }
                 }
             }
-            if (!is_blocked) {
-                return cur;
-            }
+            if (!is_blocked) return cur;
         }
 
         for (dirs) |d| {
@@ -254,9 +309,11 @@ test "findPath: straight line" {
     const allocator = std.testing.allocator;
     var m = try TestGrid.init(allocator, 80, 40, .open);
     defer m.deinit(allocator);
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const len = findPath(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null) orelse unreachable;
+    const len = findPath(&scratch, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null) orelse unreachable;
     try std.testing.expectEqual(@as(usize, 5), len);
     try std.testing.expectEqual(@as(usize, 6), path_buf[0].x);
     try std.testing.expectEqual(@as(usize, 10), path_buf[4].x);
@@ -267,9 +324,11 @@ test "findPath: around obstacle" {
     var m = try TestGrid.init(allocator, 80, 40, .open);
     defer m.deinit(allocator);
     for (5..35) |y| m.setWall(20, y);
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const len = findPath(allocator, &m, .{ .x = 10, .y = 20 }, .{ .x = 30, .y = 20 }, path_buf, null) orelse unreachable;
+    const len = findPath(&scratch, &m, .{ .x = 10, .y = 20 }, .{ .x = 30, .y = 20 }, path_buf, null) orelse unreachable;
     try std.testing.expect(len > 20);
 }
 
@@ -282,9 +341,11 @@ test "findPath: unreachable" {
             if (x == 8 or x == 12 or y == 8 or y == 12) m.setWall(x, y);
         }
     }
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const result = findPath(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 10 }, path_buf, null);
+    const result = findPath(&scratch, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 10 }, path_buf, null);
     try std.testing.expect(result == null);
 }
 
@@ -292,9 +353,11 @@ test "findPath: start equals goal" {
     const allocator = std.testing.allocator;
     var m = try TestGrid.init(allocator, 80, 40, .open);
     defer m.deinit(allocator);
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const len = findPath(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 5, .y = 5 }, path_buf, null) orelse unreachable;
+    const len = findPath(&scratch, &m, .{ .x = 5, .y = 5 }, .{ .x = 5, .y = 5 }, path_buf, null) orelse unreachable;
     try std.testing.expectEqual(@as(usize, 0), len);
 }
 
@@ -303,9 +366,11 @@ test "findPath: goal is unwalkable" {
     var m = try TestGrid.init(allocator, 80, 40, .open);
     defer m.deinit(allocator);
     m.setWall(10, 5);
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const result = findPath(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null);
+    const result = findPath(&scratch, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null);
     try std.testing.expect(result == null);
 }
 
@@ -314,9 +379,11 @@ test "findPath: start is unwalkable" {
     var m = try TestGrid.init(allocator, 80, 40, .open);
     defer m.deinit(allocator);
     m.setWall(5, 5);
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const result = findPath(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null);
+    const result = findPath(&scratch, &m, .{ .x = 5, .y = 5 }, .{ .x = 10, .y = 5 }, path_buf, null);
     try std.testing.expect(result == null);
 }
 
@@ -324,9 +391,11 @@ test "findPath: diagonal path" {
     const allocator = std.testing.allocator;
     var m = try TestGrid.init(allocator, 80, 40, .open);
     defer m.deinit(allocator);
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const len = findPath(allocator, &m, .{ .x = 0, .y = 0 }, .{ .x = 10, .y = 10 }, path_buf, null) orelse unreachable;
+    const len = findPath(&scratch, &m, .{ .x = 0, .y = 0 }, .{ .x = 10, .y = 10 }, path_buf, null) orelse unreachable;
     try std.testing.expectEqual(@as(usize, 20), len);
 }
 
@@ -339,9 +408,11 @@ test "findPath: corridor" {
         m.setWall(x, 19);
         m.setWall(x, 21);
     }
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const result = findPath(allocator, &m, .{ .x = 10, .y = 20 }, .{ .x = 50, .y = 20 }, path_buf, null);
+    const result = findPath(&scratch, &m, .{ .x = 10, .y = 20 }, .{ .x = 50, .y = 20 }, path_buf, null);
     try std.testing.expect(result != null);
 }
 
@@ -349,18 +420,34 @@ test "findPath: blocked positions" {
     const allocator = std.testing.allocator;
     var m = try TestGrid.init(allocator, 80, 40, .open);
     defer m.deinit(allocator);
-    const blocked = [_]Pos{ .{ .x = 7, .y = 5 } };
+    const blocked = [_]Pos{.{ .x = 7, .y = 5 }};
+    var scratch = try Scratch.init(allocator, 80 * 40);
+    defer scratch.deinit();
     const path_buf = try allocator.alloc(Pos, 256);
     defer allocator.free(path_buf);
-    const result = findPath(allocator, &m, .{ .x = 5, .y = 5 }, .{ .x = 7, .y = 5 }, path_buf, &blocked);
+    const result = findPath(&scratch, &m, .{ .x = 5, .y = 5 }, .{ .x = 7, .y = 5 }, path_buf, &blocked);
     try std.testing.expect(result == null);
+}
+
+test "findPath: optimal on open grid (heap correctness)" {
+    const allocator = std.testing.allocator;
+    var m = try TestGrid.init(allocator, 40, 40, .open);
+    defer m.deinit(allocator);
+    var scratch = try Scratch.init(allocator, 40 * 40);
+    defer scratch.deinit();
+    const path_buf = try allocator.alloc(Pos, 256);
+    defer allocator.free(path_buf);
+    const len = findPath(&scratch, &m, .{ .x = 0, .y = 0 }, .{ .x = 15, .y = 15 }, path_buf, null) orelse unreachable;
+    try std.testing.expectEqual(@as(usize, 30), len);
 }
 
 test "hasPath: reachable" {
     const allocator = std.testing.allocator;
     var m = try TestGrid.init(allocator, 20, 20, .open);
     defer m.deinit(allocator);
-    try std.testing.expect(hasPath(allocator, &m, .{ .x = 0, .y = 0 }, .{ .x = 19, .y = 19 }));
+    var scratch = try Scratch.init(allocator, 20 * 20);
+    defer scratch.deinit();
+    try std.testing.expect(hasPath(&scratch, &m, .{ .x = 0, .y = 0 }, .{ .x = 19, .y = 19 }));
 }
 
 test "hasPath: blocked by wall" {
@@ -368,14 +455,18 @@ test "hasPath: blocked by wall" {
     var m = try TestGrid.init(allocator, 20, 20, .open);
     defer m.deinit(allocator);
     for (0..20) |y| m.setWall(10, y);
-    try std.testing.expect(!hasPath(allocator, &m, .{ .x = 0, .y = 0 }, .{ .x = 19, .y = 0 }));
+    var scratch = try Scratch.init(allocator, 20 * 20);
+    defer scratch.deinit();
+    try std.testing.expect(!hasPath(&scratch, &m, .{ .x = 0, .y = 0 }, .{ .x = 19, .y = 0 }));
 }
 
 test "findNearestReachable: returns goal when walkable" {
     const allocator = std.testing.allocator;
     var m = try TestGrid.init(allocator, 20, 20, .open);
     defer m.deinit(allocator);
-    const near = findNearestReachable(allocator, &m, .{ .x = 10, .y = 10 }, null);
+    var scratch = try Scratch.init(allocator, 20 * 20);
+    defer scratch.deinit();
+    const near = findNearestReachable(&scratch, &m, .{ .x = 10, .y = 10 }, null);
     try std.testing.expectEqual(@as(usize, 10), near.?.x);
     try std.testing.expectEqual(@as(usize, 10), near.?.y);
 }
@@ -384,8 +475,18 @@ test "findNearestReachable: skips blocked goal" {
     const allocator = std.testing.allocator;
     var m = try TestGrid.init(allocator, 20, 20, .open);
     defer m.deinit(allocator);
-    const blocked = [_]Pos{ .{ .x = 10, .y = 10 } };
-    const near = findNearestReachable(allocator, &m, .{ .x = 10, .y = 10 }, &blocked);
+    const blocked = [_]Pos{.{ .x = 10, .y = 10 }};
+    var scratch = try Scratch.init(allocator, 20 * 20);
+    defer scratch.deinit();
+    const near = findNearestReachable(&scratch, &m, .{ .x = 10, .y = 10 }, &blocked);
     try std.testing.expect(near != null);
     try std.testing.expect(!((near.?.x == 10) and (near.?.y == 10)));
+}
+
+test "Scratch ensure grows and frees cleanly" {
+    const allocator = std.testing.allocator;
+    var s = try Scratch.init(allocator, 10 * 10);
+    s.ensure(80 * 40) catch unreachable;
+    try std.testing.expectEqual(@as(usize, 80 * 40), s.capacity);
+    s.deinit();
 }

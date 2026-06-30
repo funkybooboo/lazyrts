@@ -5,10 +5,11 @@ const color = @import("color.zig");
 const header = @import("header.zig");
 const footer = @import("footer.zig");
 const coords = @import("../lib/coords.zig");
-const lib_spatial = @import("../lib/spatial.zig");
 const config = @import("../config.zig");
 const queries = @import("../game/queries.zig");
 const selection = @import("../game/selection.zig");
+const perf = @import("../game/perf.zig");
+const fmt = @import("../lib/fmt.zig");
 
 pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
     canvas.clear();
@@ -36,17 +37,17 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
             const screen_y: u16 = @intCast(headerHeight + row);
             if (screen_y >= drawer_top) continue;
 
-            if (lib_spatial.indexOfAt((ctx).units, unit_x, unit_y)) |ui| {
+            if (ctx.unitAt(unit_x, unit_y)) |ui| {
                 const u = &state.units[ui];
                 const is_selected = selection.viewHasSelected(state.selectView(), ui);
                 const s = cellStyle(.unit, color.unitColor(u, cfg), is_selected, is_cursor, cfg);
                 canvas.writeCell(screen_x, screen_y, u.glyph(state.cfg), s);
-            } else if (lib_spatial.indexOfAt((ctx).buildings, unit_x, unit_y)) |bi| {
+            } else if (ctx.buildingAt(unit_x, unit_y)) |bi| {
                 const b = &state.buildings[bi];
                 const is_selected = selection.viewHasBuildingSelected(state.buildingView(), bi);
                 const s = cellStyle(.building, color.buildingColor(b, cfg), is_selected, is_cursor, cfg);
                 canvas.writeCell(screen_x, screen_y, b.glyph(state.cfg), s);
-            } else if (lib_spatial.indexOfAt((ctx).wildlife, unit_x, unit_y)) |ni| {
+            } else if (ctx.wildlifeAt(unit_x, unit_y)) |ni| {
                 const n = &state.wildlife[ni];
                 const s = cellStyle(.unit, color.wildlifeColor(n, cfg), false, is_cursor, cfg);
                 canvas.writeCell(screen_x, screen_y, n.glyph(state.cfg), s);
@@ -61,6 +62,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
 
     footer.draw(canvas, state);
 
+    if (state.perf.enabled) drawPerf(canvas, state, cfg);
     if (state.help_mode) drawHelp(canvas, cfg);
 }
 
@@ -174,4 +176,82 @@ fn drawHelp(canvas: terminal.Canvas, cfg: *const config.Config) void {
     const foot = " press ? or Esc to close ";
     const foot_x: usize = ox + (box_w - foot.len) / 2;
     canvas.writeStr(@intCast(foot_x), @intCast(foot_y), foot, dim);
+}
+
+fn drawPerf(canvas: terminal.Canvas, state: *const state_mod.State, cfg: *const config.Config) void {
+    const label: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.header_active }, .bold = true };
+    const val: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.drawer_val } };
+    const dim: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.drawer_dim } };
+    const border: terminal.Style = .{ .fg = .{ .rgb = cfg.colors.help_border }, .bg = .{ .rgb = cfg.colors.help_bg } };
+    const fill_bg = cfg.colors.help_bg;
+
+    const title = " perf ";
+    const box_w: usize = 30;
+    const box_h: usize = 9;
+    const cw: usize = @intCast(canvas.width());
+    const ch: usize = @intCast(canvas.height());
+    if (box_w + 2 > cw or box_h + 2 > ch) return;
+    const ox: usize = 1;
+    const oy: usize = 1;
+
+    for (0..box_h) |y| {
+        for (0..box_w) |x| {
+            canvas.writeCell(@intCast(ox + x), @intCast(oy + y), " ", .{ .bg = .{ .rgb = fill_bg } });
+        }
+    }
+    canvas.writeStr(@intCast(ox), @intCast(oy), "+", border);
+    for (0..box_w - 2) |x| canvas.writeStr(@intCast(ox + 1 + x), @intCast(oy), "-", border);
+    canvas.writeStr(@intCast(ox + box_w - 1), @intCast(oy), "+", border);
+    for (0..box_h - 2) |y| {
+        canvas.writeStr(@intCast(ox), @intCast(oy + 1 + y), "|", border);
+        canvas.writeStr(@intCast(ox + box_w - 1), @intCast(oy + 1 + y), "|", border);
+    }
+    canvas.writeStr(@intCast(ox), @intCast(oy + box_h - 1), "+", border);
+    for (0..box_w - 2) |x| canvas.writeStr(@intCast(ox + 1 + x), @intCast(oy + box_h - 1), "-", border);
+    canvas.writeStr(@intCast(ox + box_w - 1), @intCast(oy + box_h - 1), "+", border);
+    const title_x = ox + (box_w - title.len) / 2;
+    canvas.writeStr(@intCast(title_x), @intCast(oy), title, label);
+
+    var us_buf: [12]u8 = undefined;
+    var row: usize = oy + 2;
+    const stages = [_]perf.Stage{ .units, .wildlife, .training };
+    for (stages) |s| {
+        const sl = perf.stageLabel[@intFromEnum(s)];
+        canvas.writeStr(@intCast(ox + 2), @intCast(row), sl, label);
+        const avg = state.perf.avgTick(s);
+        const mx = state.perf.maxTick(s);
+        var pos: usize = 0;
+        pos += fmt.formatUint(us_buf[pos..], avg / 1000);
+        us_buf[pos] = 'u'; pos += 1;
+        us_buf[pos] = 's'; pos += 1;
+        canvas.writeStr(@intCast(ox + 12), @intCast(row), us_buf[0..pos], val);
+        pos = 0;
+        us_buf[pos] = 'm'; pos += 1;
+        us_buf[pos] = 'x'; pos += 1;
+        pos += fmt.formatUint(us_buf[pos..], mx / 1000);
+        us_buf[pos] = 'u'; pos += 1;
+        us_buf[pos] = 's'; pos += 1;
+        canvas.writeStr(@intCast(ox + 20), @intCast(row), us_buf[0..pos], dim);
+        row += 1;
+    }
+
+    canvas.writeStr(@intCast(ox + 2), @intCast(row), "render", label);
+    var pos: usize = 0;
+    pos += fmt.formatUint(us_buf[pos..], state.perf.avgRender() / 1000);
+    us_buf[pos] = 'u'; pos += 1;
+    us_buf[pos] = 's'; pos += 1;
+    canvas.writeStr(@intCast(ox + 12), @intCast(row), us_buf[0..pos], val);
+    pos = 0;
+    us_buf[pos] = 'm'; pos += 1;
+    us_buf[pos] = 'x'; pos += 1;
+    pos += fmt.formatUint(us_buf[pos..], state.perf.maxRender() / 1000);
+    us_buf[pos] = 'u'; pos += 1;
+    us_buf[pos] = 's'; pos += 1;
+    canvas.writeStr(@intCast(ox + 20), @intCast(row), us_buf[0..pos], dim);
+    row += 1;
+
+    canvas.writeStr(@intCast(ox + 2), @intCast(row), "pf/tick", label);
+    pos = fmt.formatUint(us_buf[0..], state.perf.avgPathfind());
+    canvas.writeStr(@intCast(ox + 12), @intCast(row), us_buf[0..pos], val);
+    canvas.writeStr(@intCast(ox + 20), @intCast(row), "` off", dim);
 }

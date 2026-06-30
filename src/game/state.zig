@@ -8,13 +8,17 @@ const config = @import("../config.zig");
 const time = @import("../lib/time.zig");
 const coords = @import("../lib/coords.zig");
 const lib_spatial = @import("../lib/spatial.zig");
+const astar = @import("../lib/pathfinding.zig");
 const queries = @import("queries.zig");
 const economy = @import("economy.zig");
 const selection = @import("selection.zig");
 const spawning = @import("spawning.zig");
 const tick_mod = @import("tick.zig");
+const perf_mod = @import("perf.zig");
 
 const training = @import("training.zig");
+
+pub const Perf = perf_mod.Perf;
 
 pub const MAX_SELECT: usize = selection.MAX_SELECT;
 
@@ -61,6 +65,9 @@ pub const State = struct {
     tick_count: usize = 0,
     training_queues: [training.MAX_QUEUES]training.Queue = [_]training.Queue{.{ .building_idx = 0 }} ** training.MAX_QUEUES,
     training_queue_count: usize = 0,
+    perf: perf_mod.Perf = .{},
+    path_scratch: astar.Scratch = .{ .allocator = undefined },
+    spatial_index: queries.Index = .{ .width = 0, .height = 0, .unit_at = &.{}, .building_at = &.{}, .wildlife_at = &.{}, .allocator = undefined },
     cfg: *const config.Config,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64, term_w: u16, term_h: u16, cfg: *const config.Config) !State {
@@ -90,6 +97,22 @@ pub const State = struct {
             .cfg = cfg,
         };
 
+        s.path_scratch = astar.Scratch.init(allocator, @as(usize, map_w) * @as(usize, map_h)) catch |e| {
+            s.world.deinit(allocator);
+            allocator.free(units);
+            allocator.free(buildings);
+            allocator.free(wildlife_arr);
+            return e;
+        };
+        s.spatial_index = queries.Index.initZeroed(allocator, @as(usize, map_w), @as(usize, map_h)) catch |e| {
+            s.path_scratch.deinit();
+            s.world.deinit(allocator);
+            allocator.free(units);
+            allocator.free(buildings);
+            allocator.free(wildlife_arr);
+            return e;
+        };
+
         for (s.units) |*u| {
             u.* = .{
                 .x = 0,
@@ -115,6 +138,8 @@ pub const State = struct {
         selection.selectSingle(s.unitSelection(), 0);
         spawning.spawnDeer(&s);
 
+        s.rebuildSpatialIndex();
+
         s.cursor_x = s.world.player_tc_x;
         s.cursor_y = s.world.player_tc_y;
 
@@ -128,6 +153,8 @@ pub const State = struct {
         self.allocator.free(self.units);
         self.allocator.free(self.buildings);
         self.allocator.free(self.wildlife);
+        self.path_scratch.deinit();
+        self.spatial_index.deinit();
         self.world.deinit(self.allocator);
     }
 
@@ -136,7 +163,12 @@ pub const State = struct {
             .units = self.units[0..self.unit_count],
             .buildings = self.buildings[0..self.building_count],
             .wildlife = self.wildlife[0..self.wildlife_count],
+            .index = &self.spatial_index,
         };
+    }
+
+    pub fn rebuildSpatialIndex(self: *State) void {
+        self.spatial_index.rebuild(self.units[0..self.unit_count], self.buildings[0..self.building_count], self.wildlife[0..self.wildlife_count]);
     }
 
     pub fn unitSelection(self: *State) selection.Ctx {
@@ -186,7 +218,7 @@ pub fn resowSelected(s: *State) bool {
     if (s.selected_building) |bi| {
         return economy.resowFarm(s, bi);
     }
-    const bi = lib_spatial.indexOfAt((s.spatialCtx()).buildings, s.cursor_x, s.cursor_y) orelse return false;
+    const bi = (s.spatialCtx()).buildingAt(s.cursor_x, s.cursor_y) orelse return false;
     return economy.resowFarm(s, bi);
 }
 

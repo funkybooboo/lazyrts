@@ -39,7 +39,7 @@ fn beginToDropoff(s: *State, i: usize) bool {
         return false;
     };
     u.dest = buildingPos(s, di);
-    _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, buildingPos(s, di), u.pos());
+    _ = movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, buildingPos(s, di), u.pos());
     return true;
 }
 
@@ -53,13 +53,13 @@ fn routeDropoff(s: *State, i: usize, on_arrive: anytype) void {
                 return;
             }
             u.dest = dp;
-            _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, dp, u.pos());
+            _ = movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, dp, u.pos());
         } else {
             on_arrive(s, i);
             return;
         }
     }
-    movement.advance(s.allocator, s.spatialCtx(), &s.world, s.units, i);
+    movement.advance(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, s.tick_count, s.cfg.timing.repath_cooldown_ticks, &s.spatial_index);
 }
 
 pub fn findNearestDropoff(s: *const State, from: Pos) ?usize {
@@ -120,8 +120,14 @@ pub fn findFreeFarm(s: *const State, from: Pos) ?usize {
 
 pub fn removeDeer(s: *State, idx: usize) void {
     if (idx >= s.wildlife_count) return;
+    const removed_pos = s.wildlife[idx].pos();
     const last = s.wildlife_count - 1;
-    if (idx != last) s.wildlife[idx] = s.wildlife[last];
+    var swapped_pos: ?coords.Pos = null;
+    if (idx != last) {
+        swapped_pos = s.wildlife[last].pos();
+        s.wildlife[idx] = s.wildlife[last];
+    }
+    s.spatial_index.removeWildlife(idx, last, removed_pos, swapped_pos);
     s.wildlife_count = last;
     for (0..s.unit_count) |i| {
         if (s.units[i].target_deer_idx) |td| {
@@ -154,7 +160,7 @@ fn tickWood(s: *State, i: usize) void {
                     if (findNearestTree(s, anchor, s.cfg.economy.grove_scan_radius)) |nt| {
                         u.gather_target = nt;
                         u.gather_phase = .to_resource;
-                        _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, nt, u.pos());
+                        _ = movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, nt, u.pos());
                     } else {
                         u.state = .idle;
                         u.gather_phase = .none;
@@ -171,9 +177,9 @@ fn tickWood(s: *State, i: usize) void {
                     return;
                 }
                 if (u.path_len == 0) {
-                    _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, gt, u.pos());
+                    _ = movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, gt, u.pos());
                 }
-                movement.advance(s.allocator, s.spatialCtx(), &s.world, s.units, i);
+                movement.advance(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, s.tick_count, s.cfg.timing.repath_cooldown_ticks, &s.spatial_index);
             } else {
                 u.state = .idle;
                 u.gather_phase = .none;
@@ -222,7 +228,7 @@ fn dropAndContinueWood(s: *State, i: usize) void {
         u.gather_target = nt;
         u.grove_anchor = anchor;
         u.gather_phase = .to_resource;
-        _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, nt, u.pos());
+        _ = movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, nt, u.pos());
     } else {
         u.state = .idle;
         u.gather_phase = .none;
@@ -264,10 +270,10 @@ fn tickHunt(s: *State, i: usize) void {
                 u.path_idx = 0;
                 return;
             }
-            if (u.path_len == 0 or !pathHeadsTo(u, dpos)) {
-                _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, dpos, u.pos());
+            if (u.path_len == 0 or pathDrift(u, dpos) > s.cfg.economy.hunt_drift_repath) {
+                _ = movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, dpos, u.pos());
             }
-            movement.advance(s.allocator, s.spatialCtx(), &s.world, s.units, i);
+            movement.advance(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, s.tick_count, s.cfg.timing.repath_cooldown_ticks, &s.spatial_index);
         },
         .harvesting => {
             const di = u.target_deer_idx orelse {
@@ -311,10 +317,10 @@ fn tickHunt(s: *State, i: usize) void {
     }
 }
 
-fn pathHeadsTo(u: *const unit.Unit, target: Pos) bool {
-    if (u.path_len == 0) return false;
+fn pathDrift(u: *const unit.Unit, target: Pos) usize {
+    if (u.path_len == 0) return std.math.maxInt(usize);
     const end = u.path[u.path_len - 1];
-    return coords.manhattan(end, target) <= 1;
+    return coords.manhattan(end, target);
 }
 
 fn dropAndContinueHunt(s: *State, i: usize) void {
@@ -382,8 +388,8 @@ fn tickFarm(s: *State, i: usize) void {
                 u.path_idx = 0;
                 return;
             }
-            if (u.path_len == 0) _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, fpos, u.pos());
-            movement.advance(s.allocator, s.spatialCtx(), &s.world, s.units, i);
+            if (u.path_len == 0) _ = movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, fpos, u.pos());
+            movement.advance(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, s.tick_count, s.cfg.timing.repath_cooldown_ticks, &s.spatial_index);
         },
         .harvesting => {
             const b = &s.buildings[fi];
@@ -413,7 +419,7 @@ fn tickFarm(s: *State, i: usize) void {
                 u.gather_phase = .to_dropoff;
                 if (findNearestDropoff(s, u.pos())) |di| {
                     u.dest = .{ .x = s.buildings[di].x, .y = s.buildings[di].y };
-                    _ = movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, .{ .x = s.buildings[di].x, .y = s.buildings[di].y }, u.pos());
+                    _ = movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, .{ .x = s.buildings[di].x, .y = s.buildings[di].y }, u.pos());
                 }
             }
         },
@@ -461,18 +467,18 @@ pub fn startGatherAt(s: *State, i: usize, target: Pos) bool {
         u.gather_target = target;
         u.grove_anchor = target;
         resetCarry(u);
-        return movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, target, u.pos());
+        return movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, target, u.pos());
     }
-    if (lib_spatial.indexOfAt((s.spatialCtx()).wildlife, target.x, target.y)) |ni| {
+    if (lib_spatial.indexOfAt(s.wildlife[0..s.wildlife_count], target.x, target.y)) |ni| {
         if (s.wildlife[ni].kind() != .deer) return false;
         u.state = .hunting;
         u.gather_phase = .to_resource;
         u.target_deer_idx = ni;
         u.gather_target = s.wildlife[ni].pos();
         resetCarry(u);
-        return movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, s.wildlife[ni].pos(), u.pos());
+        return movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, s.wildlife[ni].pos(), u.pos());
     }
-    if (lib_spatial.indexOfAt((s.spatialCtx()).buildings, target.x, target.y)) |bi| {
+    if (s.spatialCtx().buildingAt(target.x, target.y)) |bi| {
         const b = &s.buildings[bi];
         if (b.kind() != .farm or b.owner != .player) return false;
         if (b.variant.farm.fallow or b.variant.farm.food_remaining == 0) return false;
@@ -483,7 +489,7 @@ pub fn startGatherAt(s: *State, i: usize, target: Pos) bool {
         u.target_farm_idx = bi;
         u.gather_target = .{ .x = b.x, .y = b.y };
         resetCarry(u);
-        return movement.pathToAdjacent(s.allocator, s.spatialCtx(), &s.world, s.units, i, .{ .x = b.x, .y = b.y }, u.pos());
+        return movement.pathToAdjacent(&s.path_scratch, s.spatialCtx(), &s.world, s.units, i, .{ .x = b.x, .y = b.y }, u.pos());
     }
     return false;
 }
