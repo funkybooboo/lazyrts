@@ -23,6 +23,7 @@ pub const Scratch = struct {
     open: []Pos = &.{},
     closed: []bool = &.{},
     capacity: usize = 0,
+    find_calls: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator, map_size: usize) !Scratch {
         var s: Scratch = .{ .allocator = allocator };
@@ -105,6 +106,7 @@ pub fn findPath(scratch: *Scratch, grid: anytype, start: Pos, goal: Pos, out_pat
 
     const map_size = @as(usize, width) * @as(usize, grid.height);
     scratch.ensure(map_size) catch return null;
+    scratch.find_calls += 1;
     const g = scratch.g_score[0..map_size];
     const f = scratch.f_score[0..map_size];
     const came = scratch.came_from[0..map_size];

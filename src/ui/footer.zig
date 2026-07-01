@@ -71,13 +71,13 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
             x = put(canvas, x, row2, fmtHp(&hp_buf1, u.hp, u.maxHp(state.cfg)), val);
             x = put(canvas, x, row2, " ", label);
             x = put(canvas, x, row2, stateLabel(u.state), val);
-            
+
             // Show gather details
             if (u.state == .gathering_wood or u.state == .hunting or u.state == .gathering_food) {
                 x = put(canvas, x, row2, " ", label);
                 x = put(canvas, x, row2, phaseLabel(u.gather_phase), dim);
             }
-            
+
             if (u.carry > 0 and u.carry_kind != .none) {
                 x = put(canvas, x, row2, " ", label);
                 var cbuf: [8]u8 = undefined;
@@ -89,7 +89,7 @@ pub fn draw(canvas: terminal.Canvas, state: *const state_mod.State) void {
                 x = put(canvas, x, row2, capbuf[0..caplen], dim);
                 x = put(canvas, x, row2, cargoLabel(u.carry_kind), label);
             }
-            
+
             if (state.selected_count > 1) {
                 var gbuf: [8]u8 = undefined;
                 const glen = fmt.formatUint(gbuf[0..], state.selected_count);

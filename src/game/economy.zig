@@ -127,7 +127,7 @@ pub fn removeDeer(s: *State, idx: usize) void {
         swapped_pos = s.wildlife[last].pos();
         s.wildlife[idx] = s.wildlife[last];
     }
-    s.spatial_index.removeWildlife(idx, last, removed_pos, swapped_pos);
+    s.spatial_index.removeWildlife(idx, removed_pos, swapped_pos);
     s.wildlife_count = last;
     for (0..s.unit_count) |i| {
         if (s.units[i].target_deer_idx) |td| {
@@ -555,7 +555,10 @@ test "startGatherAt wood sets gathering_wood" {
     for (0..s.world.height) |y| {
         for (0..s.world.width) |x| {
             if (s.world.at(x, y) == .tree and !queries.occupied(s.spatialCtx(), x, y)) {
-                tx = x; ty = y; ok = true; break;
+                tx = x;
+                ty = y;
+                ok = true;
+                break;
             }
         }
         if (ok) break;
@@ -575,7 +578,10 @@ test "resowFarm costs wood and restores food" {
     defer s.deinit();
     s.building_count = 3;
     s.buildings[2] = .{
-        .x = 5, .y = 5, .variant = .{ .farm = .{ .food_remaining = 0, .fallow = true } }, .owner = .player,
+        .x = 5,
+        .y = 5,
+        .variant = .{ .farm = .{ .food_remaining = 0, .fallow = true } },
+        .owner = .player,
         .hp = 100,
     };
     s.wood = s.cfg.economy.resow_wood_cost;
@@ -592,7 +598,10 @@ test "resowFarm fails without wood" {
     defer s.deinit();
     s.building_count = 3;
     s.buildings[2] = .{
-        .x = 5, .y = 5, .variant = .{ .farm = .{ .food_remaining = 0, .fallow = true } }, .owner = .player,
+        .x = 5,
+        .y = 5,
+        .variant = .{ .farm = .{ .food_remaining = 0, .fallow = true } },
+        .owner = .player,
         .hp = 100,
     };
     s.wood = 0;
@@ -695,20 +704,23 @@ test "deer dies on contact and carcass harvested over multiple trips" {
     defer s.deinit();
     var di: usize = 0;
     for (0..s.wildlife_count) |i| {
-        if (s.wildlife[i].kind() == .deer) { di = i; break; }
+        if (s.wildlife[i].kind() == .deer) {
+            di = i;
+            break;
+        }
     }
     s.wildlife[di].deer.food_remaining = s.cfg.economy.deer_total_yield;
     s.wildlife[di].deer.x = s.units[0].x + 1;
     s.wildlife[di].deer.y = s.units[0].y;
     try std.testing.expect(startGatherAt(&s, 0, s.wildlife[di].pos()));
     try std.testing.expectEqual(unit.UnitActivity.hunting, s.units[0].state);
-    
+
     // Run a few ticks to get to the deer
     for (0..10) |_| tickUnit(&s, 0);
-    
+
     // Deer should be dead immediately on contact
     try std.testing.expect(s.wildlife[di].deer.dead);
-    
+
     const trips_needed = (s.cfg.economy.deer_total_yield + s.cfg.economy.carry_capacity - 1) / s.cfg.economy.carry_capacity;
     for (0..trips_needed * 200) |_| {
         tickUnit(&s, 0);
@@ -722,7 +734,7 @@ test "dead deer carcass rots over time" {
     const cfg = config.default();
     var s = try state.State.init(allocator, 42, 80, 45, &cfg);
     defer s.deinit();
-    
+
     // Place a dead deer manually
     s.wildlife[0] = .{ .deer = .{
         .x = 10,
@@ -733,13 +745,13 @@ test "dead deer carcass rots over time" {
         .rot_accum_ms = 0,
     } };
     s.wildlife_count = 1;
-    
+
     const initial_food = s.wildlife[0].deer.food_remaining;
-    
+
     // Run tick which includes rot pass
     // At deer_rot_rate=1/sec and tick_rate=10/sec, food should decrease by 1 every 10 ticks
     for (0..15) |_| tick.tick(&s);
-    
+
     // Food should have decreased due to rot
     try std.testing.expect(s.wildlife[0].deer.food_remaining < initial_food);
 }
@@ -749,7 +761,7 @@ test "carcass removed when food reaches zero" {
     const cfg = config.default();
     var s = try state.State.init(allocator, 42, 80, 45, &cfg);
     defer s.deinit();
-    
+
     // Place a dead deer with low food
     s.wildlife[0] = .{ .deer = .{
         .x = 10,
@@ -760,10 +772,10 @@ test "carcass removed when food reaches zero" {
         .rot_accum_ms = 0,
     } };
     s.wildlife_count = 1;
-    
+
     // Run enough ticks for food to rot away (2 food at 1/sec = 20 ticks at 10 ticks/sec)
     for (0..30) |_| tick.tick(&s);
-    
+
     // Carcass should be removed
     try std.testing.expectEqual(@as(usize, 0), s.wildlife_count);
 }
@@ -777,7 +789,9 @@ test "farm gather: depletes and goes fallow" {
     var found = false;
     for (0..s.building_count) |i| {
         if (s.buildings[i].kind() == .farm and s.buildings[i].owner == .player) {
-            fi = i; found = true; break;
+            fi = i;
+            found = true;
+            break;
         }
     }
     try std.testing.expect(found);

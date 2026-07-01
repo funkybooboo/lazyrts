@@ -35,10 +35,10 @@ pub fn placeStartingFarm(s: *State) !void {
     const tc_x = s.world.player_tc_x;
     const tc_y = s.world.player_tc_y;
     const offsets = [_]struct { dx: isize, dy: isize }{
-        .{ .dx = 3, .dy = 0 },  .{ .dx = -3, .dy = 0 },
-        .{ .dx = 0, .dy = 3 },  .{ .dx = 0, .dy = -3 },
-        .{ .dx = 4, .dy = 0 },  .{ .dx = -4, .dy = 0 },
-        .{ .dx = 0, .dy = 4 },  .{ .dx = 0, .dy = -4 },
+        .{ .dx = 3, .dy = 0 }, .{ .dx = -3, .dy = 0 },
+        .{ .dx = 0, .dy = 3 }, .{ .dx = 0, .dy = -3 },
+        .{ .dx = 4, .dy = 0 }, .{ .dx = -4, .dy = 0 },
+        .{ .dx = 0, .dy = 4 }, .{ .dx = 0, .dy = -4 },
     };
     for (offsets) |o| {
         const fx = @as(isize, @intCast(tc_x)) + o.dx;
@@ -86,13 +86,9 @@ pub fn initStartingWorkers(s: *State) !void {
 
 pub fn allocateUnitPaths(s: *State) !void {
     for (0..s.unit_count) |i| {
-        s.units[i].path = s.allocator.alloc(coords.Pos, s.cfg.entity_limits.max_path) catch {
+        s.units[i].path = s.allocator.alloc(coords.Pos, s.cfg.entity_limits.max_path) catch |e| {
             for (0..i) |j| s.allocator.free(s.units[j].path);
-            s.allocator.free(s.units);
-            s.allocator.free(s.buildings);
-            s.allocator.free(s.wildlife);
-            s.world.deinit(s.allocator);
-            return error.OutOfMemory;
+            return e;
         };
     }
 }
@@ -129,7 +125,10 @@ pub fn spawnDeer(s: *State) void {
             const c = centers[ci];
             const dx = if (cx > c.x) cx - c.x else c.x - cx;
             const dy = if (cy > c.y) cy - c.y else c.y - cy;
-            if (dx + dy < min_dist) { too_close = true; break; }
+            if (dx + dy < min_dist) {
+                too_close = true;
+                break;
+            }
         }
 
         if (too_close) continue;
@@ -145,8 +144,8 @@ pub fn spawnDeer(s: *State) void {
 fn placeHerdNear(s: *State, rand: std.Random, tc_x: usize, tc_y: usize, size: usize, offset: usize, radius: usize) void {
     // Order matters: rng picks by index, drives deterministic deer placement.
     const dirs = [_]struct { dx: isize, dy: isize }{
-        .{ .dx = 1, .dy = 0 },  .{ .dx = -1, .dy = 0 },
-        .{ .dx = 0, .dy = 1 },  .{ .dx = 0, .dy = -1 },
+        .{ .dx = 1, .dy = 0 }, .{ .dx = -1, .dy = 0 },
+        .{ .dx = 0, .dy = 1 }, .{ .dx = 0, .dy = -1 },
     };
     const d = dirs[rand.intRangeAtMost(usize, 0, dirs.len - 1)];
     const cx: isize = @as(isize, @intCast(tc_x)) + d.dx * @as(isize, @intCast(offset));

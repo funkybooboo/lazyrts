@@ -66,8 +66,8 @@ pub const State = struct {
     training_queues: [training.MAX_QUEUES]training.Queue = [_]training.Queue{.{ .building_idx = 0 }} ** training.MAX_QUEUES,
     training_queue_count: usize = 0,
     perf: perf_mod.Perf = .{},
-    path_scratch: astar.Scratch = .{ .allocator = undefined },
-    spatial_index: queries.Index = .{ .width = 0, .height = 0, .unit_at = &.{}, .building_at = &.{}, .wildlife_at = &.{}, .allocator = undefined },
+    path_scratch: astar.Scratch,
+    spatial_index: queries.Index,
     cfg: *const config.Config,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64, term_w: u16, term_h: u16, cfg: *const config.Config) !State {
@@ -79,7 +79,8 @@ pub const State = struct {
         const map_area_h = term_height -| cfg.ui.drawer_height -| header_h;
         const map_h: u16 = if (map_area_h > 0) @intCast(map_area_h) else 10;
 
-        const world = try map.GameMap.init(allocator, seed, map_w, map_h, cfg);
+        var world = try map.GameMap.init(allocator, seed, map_w, map_h, cfg);
+        errdefer world.deinit(allocator);
 
         const units = try allocator.alloc(unit.Unit, cfg.entity_limits.max_units);
         errdefer allocator.free(units);
@@ -88,29 +89,21 @@ pub const State = struct {
         const wildlife_arr = try allocator.alloc(wildlife.Wildlife, cfg.entity_limits.max_wildlife);
         errdefer allocator.free(wildlife_arr);
 
+        const map_cells = @as(usize, map_w) * @as(usize, map_h);
+        var path_scratch = try astar.Scratch.init(allocator, map_cells);
+        errdefer path_scratch.deinit();
+        var spatial_index = try queries.Index.initZeroed(allocator, @as(usize, map_w), @as(usize, map_h));
+        errdefer spatial_index.deinit();
+
         var s: State = .{
             .allocator = allocator,
             .world = world,
             .units = units,
             .buildings = buildings,
             .wildlife = wildlife_arr,
+            .path_scratch = path_scratch,
+            .spatial_index = spatial_index,
             .cfg = cfg,
-        };
-
-        s.path_scratch = astar.Scratch.init(allocator, @as(usize, map_w) * @as(usize, map_h)) catch |e| {
-            s.world.deinit(allocator);
-            allocator.free(units);
-            allocator.free(buildings);
-            allocator.free(wildlife_arr);
-            return e;
-        };
-        s.spatial_index = queries.Index.initZeroed(allocator, @as(usize, map_w), @as(usize, map_h)) catch |e| {
-            s.path_scratch.deinit();
-            s.world.deinit(allocator);
-            allocator.free(units);
-            allocator.free(buildings);
-            allocator.free(wildlife_arr);
-            return e;
         };
 
         for (s.units) |*u| {

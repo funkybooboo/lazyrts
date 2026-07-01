@@ -33,7 +33,7 @@ pub const Index = struct {
     wildlife_at: []?usize,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator, width: usize, height: usize) !Index {
+    fn init(allocator: std.mem.Allocator, width: usize, height: usize) !Index {
         const n = width * height;
         return .{
             .width = width,
@@ -110,14 +110,13 @@ pub const Index = struct {
         if (new.x < self.width and new.y < self.height) self.unit_at[new.y * self.width + new.x] = i;
     }
 
-    pub fn removeWildlife(self: *Index, removed_idx: usize, last_idx: usize, removed_pos: coords.Pos, swapped_pos: ?coords.Pos) void {
+    pub fn removeWildlife(self: *Index, removed_idx: usize, removed_pos: coords.Pos, swapped_pos: ?coords.Pos) void {
         if (removed_pos.x < self.width and removed_pos.y < self.height)
             self.wildlife_at[removed_pos.y * self.width + removed_pos.x] = null;
         if (swapped_pos) |sp| {
             if (sp.x < self.width and sp.y < self.height)
                 self.wildlife_at[sp.y * self.width + sp.x] = removed_idx;
         }
-        _ = last_idx;
     }
 };
 
@@ -292,7 +291,7 @@ test "Index: removeWildlife clears and remaps swapped" {
     idx.putWildlife(0, .{ .x = 1, .y = 1 });
     idx.putWildlife(2, .{ .x = 5, .y = 5 });
     // remove slot 0, swap slot 2 into 0
-    idx.removeWildlife(0, 2, .{ .x = 1, .y = 1 }, .{ .x = 5, .y = 5 });
+    idx.removeWildlife(0, .{ .x = 1, .y = 1 }, .{ .x = 5, .y = 5 });
     try std.testing.expect(idx.wildlifeAt(1, 1) == null);
     try std.testing.expectEqual(@as(?usize, 0), idx.wildlifeAt(5, 5));
 }

@@ -140,8 +140,12 @@ fn drawHelp(canvas: terminal.Canvas, cfg: *const config.Config) void {
         }
     }
 
-    const tl = "+"; const tr = "+"; const bl = "+"; const br = "+";
-    const horiz = "-"; const vert = "|";
+    const tl = "+";
+    const tr = "+";
+    const bl = "+";
+    const br = "+";
+    const horiz = "-";
+    const vert = "|";
     const bstyle: terminal.Style = .{ .fg = .{ .rgb = border_fg }, .bg = .{ .rgb = fill_bg }, .bold = true };
 
     canvas.writeStr(@intCast(ox), @intCast(oy), tl, bstyle);
@@ -222,15 +226,21 @@ fn drawPerf(canvas: terminal.Canvas, state: *const state_mod.State, cfg: *const 
         const mx = state.perf.maxTick(s);
         var pos: usize = 0;
         pos += fmt.formatUint(us_buf[pos..], avg / 1000);
-        us_buf[pos] = 'u'; pos += 1;
-        us_buf[pos] = 's'; pos += 1;
+        us_buf[pos] = 'u';
+        pos += 1;
+        us_buf[pos] = 's';
+        pos += 1;
         canvas.writeStr(@intCast(ox + 12), @intCast(row), us_buf[0..pos], val);
         pos = 0;
-        us_buf[pos] = 'm'; pos += 1;
-        us_buf[pos] = 'x'; pos += 1;
+        us_buf[pos] = 'm';
+        pos += 1;
+        us_buf[pos] = 'x';
+        pos += 1;
         pos += fmt.formatUint(us_buf[pos..], mx / 1000);
-        us_buf[pos] = 'u'; pos += 1;
-        us_buf[pos] = 's'; pos += 1;
+        us_buf[pos] = 'u';
+        pos += 1;
+        us_buf[pos] = 's';
+        pos += 1;
         canvas.writeStr(@intCast(ox + 20), @intCast(row), us_buf[0..pos], dim);
         row += 1;
     }
@@ -238,15 +248,21 @@ fn drawPerf(canvas: terminal.Canvas, state: *const state_mod.State, cfg: *const 
     canvas.writeStr(@intCast(ox + 2), @intCast(row), "render", label);
     var pos: usize = 0;
     pos += fmt.formatUint(us_buf[pos..], state.perf.avgRender() / 1000);
-    us_buf[pos] = 'u'; pos += 1;
-    us_buf[pos] = 's'; pos += 1;
+    us_buf[pos] = 'u';
+    pos += 1;
+    us_buf[pos] = 's';
+    pos += 1;
     canvas.writeStr(@intCast(ox + 12), @intCast(row), us_buf[0..pos], val);
     pos = 0;
-    us_buf[pos] = 'm'; pos += 1;
-    us_buf[pos] = 'x'; pos += 1;
+    us_buf[pos] = 'm';
+    pos += 1;
+    us_buf[pos] = 'x';
+    pos += 1;
     pos += fmt.formatUint(us_buf[pos..], state.perf.maxRender() / 1000);
-    us_buf[pos] = 'u'; pos += 1;
-    us_buf[pos] = 's'; pos += 1;
+    us_buf[pos] = 'u';
+    pos += 1;
+    us_buf[pos] = 's';
+    pos += 1;
     canvas.writeStr(@intCast(ox + 20), @intCast(row), us_buf[0..pos], dim);
     row += 1;
 

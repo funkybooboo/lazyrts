@@ -16,42 +16,43 @@ pub fn tick(s: *State) void {
     s.tick_count += 1;
     s.perf.resetTick();
     s.rebuildSpatialIndex();
+    const pf_start = s.path_scratch.find_calls;
 
     {
         const sec = perf.section(&s.perf, .units);
         defer sec.end();
         for (0..s.unit_count) |i| {
-        const u = &s.units[i];
-        switch (u.state) {
-            .moving => {
-                if (u.path_idx < u.path_len) {
-                    const next = u.path[u.path_idx];
-                    var blocked = false;
-                    const ctx = s.spatialCtx();
-                    if (ctx.unitAt(next.x, next.y)) |other| {
-                        if (other != i) blocked = true;
-                    }
-                    if (ctx.buildingAt(next.x, next.y) != null) blocked = true;
-                    if (ctx.wildlifeAt(next.x, next.y) != null) blocked = true;
-
-                    if (blocked) {
-                        if (u.dest) |dest| {
-                            switch (movement.repathBlocked(&s.path_scratch, ctx, &s.world, s.units, i, dest, s.tick_count, s.cfg.timing.repath_cooldown_ticks)) {
-                                .fail => u.state = .idle,
-                                .wait, .ok => {},
-                            }
+            const u = &s.units[i];
+            switch (u.state) {
+                .moving => {
+                    if (u.path_idx < u.path_len) {
+                        const next = u.path[u.path_idx];
+                        var blocked = false;
+                        const ctx = s.spatialCtx();
+                        if (ctx.unitAt(next.x, next.y)) |other| {
+                            if (other != i) blocked = true;
                         }
-                        continue;
+                        if (ctx.buildingAt(next.x, next.y) != null) blocked = true;
+                        if (ctx.wildlifeAt(next.x, next.y) != null) blocked = true;
+
+                        if (blocked) {
+                            if (u.dest) |dest| {
+                                switch (movement.repathBlocked(&s.path_scratch, ctx, &s.world, s.units, i, dest, s.tick_count, s.cfg.timing.repath_cooldown_ticks)) {
+                                    .fail => u.state = .idle,
+                                    .wait, .ok => {},
+                                }
+                            }
+                            continue;
+                        }
                     }
-                }
-                const old_pos = u.pos();
-                u.step();
-                s.spatial_index.moveUnit(i, old_pos, u.pos());
-            },
-            .gathering_wood, .gathering_food, .hunting => economy.tickUnit(s, i),
-            else => {},
+                    const old_pos = u.pos();
+                    u.step();
+                    s.spatial_index.moveUnit(i, old_pos, u.pos());
+                },
+                .gathering_wood, .gathering_food, .hunting => economy.tickUnit(s, i),
+                else => {},
+            }
         }
-    }
     }
     {
         const sec = perf.section(&s.perf, .wildlife);
@@ -62,23 +63,23 @@ pub fn tick(s: *State) void {
 
         var wi: usize = 0;
         while (wi < s.wildlife_count) {
-        const n = &s.wildlife[wi];
-        if (n.deer.dead and n.deer.food_remaining > 0) {
-            const tick_ms: u32 = @intCast(s.cfg.timing.tick_period_ns / 1_000_000);
-            n.deer.rot_accum_ms += tick_ms;
-            const rot_interval_ms: u32 = 1000 / s.cfg.economy.deer_rot_rate;
-            while (n.deer.rot_accum_ms >= rot_interval_ms) {
-                n.deer.rot_accum_ms -= rot_interval_ms;
-                if (n.deer.food_remaining > 0) {
-                    n.deer.food_remaining -= 1;
+            const n = &s.wildlife[wi];
+            if (n.deer.dead and n.deer.food_remaining > 0) {
+                const tick_ms: u32 = @intCast(s.cfg.timing.tick_period_ns / 1_000_000);
+                n.deer.rot_accum_ms += tick_ms;
+                const rot_interval_ms: u32 = 1000 / s.cfg.economy.deer_rot_rate;
+                while (n.deer.rot_accum_ms >= rot_interval_ms) {
+                    n.deer.rot_accum_ms -= rot_interval_ms;
+                    if (n.deer.food_remaining > 0) {
+                        n.deer.food_remaining -= 1;
+                    }
                 }
             }
-        }
-        if (n.deer.dead and n.deer.food_remaining == 0) {
-            economy.removeDeer(s, wi);
-        } else {
-            wi += 1;
-        }
+            if (n.deer.dead and n.deer.food_remaining == 0) {
+                economy.removeDeer(s, wi);
+            } else {
+                wi += 1;
+            }
         }
     }
     {
@@ -86,6 +87,7 @@ pub fn tick(s: *State) void {
         defer sec.end();
         training.tickQueues(s);
     }
+    s.perf.setPathfind(s.path_scratch.find_calls - pf_start);
     s.perf.finishTick();
 }
 

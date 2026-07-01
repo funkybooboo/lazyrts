@@ -19,7 +19,6 @@ pub const Perf = struct {
     filled: usize = 0,
     render_head: usize = 0,
     render_filled: usize = 0,
-    ticks_since_flush: u64 = 0,
 
     pub fn resetTick(self: *Perf) void {
         self.cur = @splat(0);
@@ -34,8 +33,8 @@ pub const Perf = struct {
         self.render_cur += ns;
     }
 
-    pub fn recordPathfind(self: *Perf) void {
-        self.pathfind_calls += 1;
+    pub fn setPathfind(self: *Perf, count: u64) void {
+        self.pathfind_calls = count;
     }
 
     pub fn finishTick(self: *Perf) void {
@@ -48,7 +47,6 @@ pub const Perf = struct {
             @intCast(@min(self.pathfind_calls, @as(u64, std.math.maxInt(u32))));
         self.head = (self.head + 1) % WINDOW;
         if (self.filled < WINDOW) self.filled += 1;
-        self.ticks_since_flush += 1;
     }
 
     pub fn finishRender(self: *Perf) void {
@@ -182,8 +180,7 @@ test "section records when enabled" {
 
 test "pathfind counter accumulates" {
     var p = Perf{};
-    p.recordPathfind();
-    p.recordPathfind();
+    p.setPathfind(2);
     p.finishTick();
     try std.testing.expectEqual(@as(u64, 2), p.avgPathfind());
 }

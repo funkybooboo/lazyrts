@@ -63,6 +63,8 @@ src/
     movement.zig        movement helpers (pathTo, advance, arrived, repathBlocked) on lib A*
     map.zig             GameMap + Tile (terrain data, no rendering)
     mapgen.zig          terrain generation
+    notify.zig          notification push helpers (called from economy/training)
+    training.zig        training queues (enqueue, tickQueues)
   units/                unit entities (data + behavior per type)
   buildings/            building entities (data + behavior per type)
   resources/            harvestable resources (deer, tree) + interface
@@ -218,8 +220,10 @@ Game loop logic + world data.
   window (tick stages and render tracked in *separate* rings because
   ticks and frames are not 1:1 — multiple ticks can fire per frame).
   `Section`/`RenderSection` are no-ops when `perf.enabled` is false so
-  profiling has zero overhead when off. `recordPathfind` counts A*
-  calls per tick. Toggled by the `` ` `` key; overlay drawn in
+  profiling has zero overhead when off. A* calls/tick are counted by
+  `lib/pathfinding.Scratch.find_calls` (incremented in `findPath`);
+  `tick` snapshots the per-tick delta via `perf.setPathfind` before
+  `finishTick`. Toggled by the `` ` `` key; overlay drawn in
   `ui/board.zig`.
 - `economy.zig` -- gather state machine (`tickUnit`), drop-off
   routing (`beginToDropoff`, `routeDropoff`), `startGatherAt`/
@@ -274,6 +278,16 @@ Game loop logic + world data.
   knowledge.
 - `mapgen.zig` -- terrain generation (cluster-based forests, lakes,
   BFS path verification, TC placement).
+- `notify.zig` -- notification push helpers (`push`, `pushWoodDrop`,
+  `pushFoodDrop`, `pushUnitTrained`, `pushFarmDepleted`/`Tree`/`DeerKilled`,
+  `latest`). The notification ring buffer (`Notification`, `NotifSeverity`,
+  `MAX_NOTIFS`) lives in `state.zig` as State fields; these helpers format
+  the event text and write into it. Called from `economy`/`training`/
+  `spawning`. Formatting is intentionally on the producer (game) side so
+  `game/` never imports `ui/` — `ui/footer.zig` reads via `latest()`.
+- `training.zig` -- training queues (`Queue`, `MAX_QUEUES`, `enqueue`,
+  `tickQueues`, `itemAt`). Per-building training progress; `tickQueues`
+  advances the active item and spawns on completion via `spawning`.
 
 ### input/
 
